@@ -1,4 +1,4 @@
-## Project #1 : Credit Card Fraud Detection
+### Project #1 : Credit Card Fraud Detection
 
 # Description
 
