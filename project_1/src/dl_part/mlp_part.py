@@ -70,10 +70,10 @@ def train_test(X_tr, y_tr, X_te, y_te):
     nnp = NNP(final_model, batch_size=batch_size, criterion=criterion, metric_info=metric_info,
               dataloader_params=dataloader_params)
     nnp.train(dataset_train=dataset_train, n_epochs=epochs, lr=lr, optimizer=optimizer, clip_grad_norm=True,
-              use_stratified_split=True, callbacks=callbacks, save_best_model=True, save_root="./runs/mlp/")
+              use_stratified_split=True, callbacks=callbacks, save_best_model=True, save_root="../runs/mlp/")
     # nnp.show_history(show_lr=True)
 
-    # nnp, _ = NNP.load_model(final_model, model_path="./runs/mlp/best_model.pt", criterion=criterion, dataloader_params=dataloader_params, metric_info=metric_info)
+    # nnp, _ = NNP.load_model(final_model, model_path="../runs/mlp/best_model.pt", criterion=criterion, dataloader_params=dataloader_params, metric_info=metric_info)
     nnp.evaluate(dataset=dataset_test, show_conf_matrix=True, probs_threshold=0.5)
 
 
@@ -114,6 +114,6 @@ if __name__ == "__main__" :
     }
 
     # optimize(X_train, y_train, X_test, y_test)
-    train_test(X_train, y_train, X_test, y_test)
+    # train_test(X_train, y_train, X_test, y_test)
 
 

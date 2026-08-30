@@ -29,4 +29,4 @@ if __name__ == "__main__" :
     df = load_csv("./data/creditcard.csv", show_info=False)
     X_train, X_test, y_train, y_test = split_data(df, target="Class", train_size=0.8)
 
-    xgb_train_test(X_train, y_train, X_test, y_test, optimize=False)
+    # xgb_train_test(X_train, y_train, X_test, y_test, optimize=False)
