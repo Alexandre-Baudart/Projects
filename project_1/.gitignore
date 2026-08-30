@@ -1,6 +1,5 @@
 .cadence
 src/cpp_part
-src/runs
 rapport
 .idea
 __pycache__
