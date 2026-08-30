@@ -377,3 +377,17 @@ def load_model(model, model_path, device) :
 
     return model
 
+def compute_pos_weight(dataset, eps: float = 1e-6):
+    y = torch.tensor(dataset.labels).float()
+
+    if y.ndim != 2:
+        raise ValueError(f"Expected shape (N, C), got {y.shape}")
+
+    pos = y.sum(dim=0)
+    neg = y.shape[0] - pos
+
+    pos_weight = neg / (pos + eps)
+    # pos_weight = torch.clamp(pos_weight, max=50)
+
+    return pos_weight
+

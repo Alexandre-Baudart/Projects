@@ -19,27 +19,8 @@ def metric_config(metric: str = "acc") :
         return accuracy_score, "accuracy"
 
 
-def get_used_cpu(optim_cv_used: bool = False) :
-    os_count = os.cpu_count()
-    cpu_used = None
-    cpu_used_cv = None
-
-    if os_count :
-        if os_count > 2 :
-            if optim_cv_used :
-                cpu_used_tmp = os_count - 2
-                cpu_used = cpu_used_tmp // 2
-                cpu_used_cv = cpu_used_tmp - cpu_used
-
-                return cpu_used, cpu_used_cv
-            else :
-                cpu_used = os_count - 2
-        else :
-            cpu_used = os_count
-
-        os.environ["LOKY_MAX_CPU_COUNT"] = str(cpu_used)
-
-    return cpu_used, cpu_used_cv
+def get_cpu_available() :
+    return os.cpu_count() - 2
 
 
 def random_init(seed: int = 42) :

@@ -10,7 +10,6 @@ from .utils import metric_config
 from analysis_utils import display_conf_matrix
 from project_utils import plot_roc_curve, plot_pr_auc_curve
 
-
 class Base(ABC) :
     def __init__(self, params: dict | None = None) :
         self.params = params
@@ -19,23 +18,22 @@ class Base(ABC) :
         self.n_features = None
         self.classes = None
 
-
     @abstractmethod
     def optimal_params_search(self, X: np.ndarray, y: np.ndarray) -> dict :
         pass
-
 
     @abstractmethod
     def fit(self, X: np.ndarray, y: np.ndarray, metric: str = "acc") :
         pass
 
-
     @final
-    def predict(self, X: np.ndarray) :
+    def predict(self, X: np.ndarray, return_probs: bool = False) :
         if not self.model : return None
 
-        return self.model.predict(X)
-
+        if not return_probs:
+            return self.model.predict(X)
+        else:
+            return self.model.predict_proba(X)
 
     @final
     def _score(self, y_true, y_pred, metric: str = "acc", show_auc_curves: bool = False) :
@@ -48,35 +46,38 @@ class Base(ABC) :
         score, metric  = metric_config(metric)
         print(f"\nScore ({metric}) : {score(y_true, y_pred):.4f}")
 
-
     @final
-    def test(self, X, y, metrics: list | None = None, conf_matrix: bool = False, cm_save_root: str | None = None, clf_report: bool = False,  cr_save_root: str | None = None) :
+    def test(self, X, y, metrics: list | None = None, conf_matrix: bool = False, cm_save_root: str | None = None, clf_report: bool = False,
+             cr_save_root: str | None = None, show_auc_curves: bool = False) :
+
         print("\n=== Test ===")
 
-        y_pred = self.predict(X)
+        if metrics is None : metrics = ["acc"]
 
-        if y_pred is not None :
-            if metrics is None : metrics = ["acc"]
+        y_pred = None
 
-            for metric in metrics :
+        for metric in metrics :
+            if metric == "auc" or metric == "pr_auc":
+                y_prob = self.predict(X, return_probs=True)[:, 1]
+                y_pred = (y_prob >= 0.5).astype(int)
+                self._score(y_true=y, y_pred=y_prob, metric=metric, show_auc_curves=show_auc_curves)
+            else :
+                y_pred = self.predict(X)
                 self._score(y_true=y, y_pred=y_pred, metric=metric)
 
-            if conf_matrix :
-                cm = confusion_matrix(y, y_pred)
-                display_conf_matrix(cm=cm, save_root=cm_save_root)
+        if conf_matrix and y_pred is not None:
+            cm = confusion_matrix(y, y_pred)
+            display_conf_matrix(cm=cm, save_root=cm_save_root)
 
-            if clf_report :
-                print("\n=== Classification Report ===\n")
-                cr = classification_report(y, y_pred)
-                print(cr)
+        if clf_report and y_pred is not None:
+            print("\n=== Classification Report ===\n")
+            cr = classification_report(y, y_pred)
+            print(cr)
 
-                if cr_save_root is not None :
-                    cr_path = os.path.join(cr_save_root, "clf_report.json")
-                    with open(cr_path, 'w') as file:
-                        json.dump(cr, file, indent=4)
-        else :
-            raise RuntimeError("\nErreur dans l'inférence du modèle !")
-
+            if cr_save_root is not None :
+                cr_path = os.path.join(cr_save_root, "clf_report.json")
+                with open(cr_path, 'w') as file:
+                    json.dump(cr, file, indent=4)
 
     def to_onnx(self, filename: str = "model") :
         from skl2onnx import convert_sklearn

@@ -283,7 +283,7 @@ class NNP :
             raise ValueError(f"Unknown mode: {self.mode}")
 
 
-    def _validate(self, used_loader: str = "validation", track_description: str = "Validation...") :
+    def _validate(self, used_loader: str = "validation", probs_threshold: float = 0.5, track_description: str = "Validation...") :
         y_true = []
         y_pred = []
         valid_loss = []
@@ -319,7 +319,7 @@ class NNP :
 
                 y_true.append(targets.detach().cpu())
 
-                pred = self._decode(output, return_probs=return_probs)
+                pred = self._decode(output, threshold=probs_threshold, return_probs=return_probs)
                 y_pred.append(pred.detach().cpu())
 
         y_true = torch.cat(y_true)
@@ -330,13 +330,13 @@ class NNP :
         return y_true, y_pred, avg_valid_loss
 
 
-    def test(self, dataset_test, track_description: str = "Test...") :
+    def test(self, dataset_test, probs_threshold: float = 0.5, track_description: str = "Test...") :
         if self.dataloader_params is not None :
             self.test_loader = to_loader(dataset_test, batch_size=self.batch_size, **self.dataloader_params)
         else :
             self.test_loader = to_loader(dataset_test, batch_size=self.batch_size)
 
-        y_true_test, y_pred_test, test_loss = self._validate(used_loader="test", track_description=track_description)
+        y_true_test, y_pred_test, test_loss = self._validate(used_loader="test", probs_threshold=probs_threshold, track_description=track_description)
 
         test_score = self._compute_score(y_true_test, y_pred_test)
         print(f"Test results ~ Test {self.metric} : {test_score:.4f} - Test loss : {test_loss:.4f}\n")
@@ -344,7 +344,7 @@ class NNP :
         return y_true_test, y_pred_test
 
 
-    def predict(self, dataset, track_description: str = "Prediction...") :
+    def predict(self, dataset, probs_threshold: float = 0.5, track_description: str = "Prediction...") :
         y_pred = []
 
         ref_model = self.model if self.model_ema is None else self.model_ema.module
@@ -368,7 +368,7 @@ class NNP :
                 with autocast(device_type=self.device.type, enabled=self.use_amp) :
                     output = ref_model(inputs)
 
-                pred = self._decode(output)
+                pred = self._decode(output, threshold=probs_threshold)
                 y_pred.append(pred.detach().cpu())
 
         y_pred = torch.cat(y_pred)
@@ -377,7 +377,7 @@ class NNP :
 
 
     @final
-    def evaluate(self, dataset, show_conf_matrix: bool = False, track_description: str = "Evaluation...") :
+    def evaluate(self, dataset, show_conf_matrix: bool = False, probs_threshold: float = 0.5, track_description: str = "Evaluation...") :
         y_true = []
         y_prob = []
         y_pred = []
@@ -404,8 +404,8 @@ class NNP :
 
                 y_true.append(targets.detach().cpu())
 
-                prob = self._decode(output, return_probs=True)
-                pred = self._decode(output, return_probs=False)
+                prob = self._decode(output, threshold=probs_threshold, return_probs=True)
+                pred = self._decode(output, threshold=probs_threshold, return_probs=False)
 
                 y_prob.append(prob.detach().cpu())
                 y_pred.append(pred.detach().cpu())
@@ -430,7 +430,7 @@ class NNP :
             auc = AUROC(**metric_params)(y_prob, y_true.long())
             pr_auc = AveragePrecision(**metric_params)(y_prob, y_true.long())
 
-            print(f"\nEnsemble evaluation results : \n\tacc : {acc:.4f} \n\tprecision : {precision:.4f} \n\trecall : {recall:.4f} \n\tf1-score : {f1_score:.4f} \n\tAUC : {auc:.4f}\n\tPR-AUC : {pr_auc:.4f}")
+            print(f"\nEvaluation results : \n\tacc : {acc:.4f} \n\tprecision : {precision:.4f} \n\trecall : {recall:.4f} \n\tf1-score : {f1_score:.4f} \n\tAUC : {auc:.4f}\n\tPR-AUC : {pr_auc:.4f}")
 
             if show_conf_matrix :
                 cm = confusion_matrix(y_true, y_pred, labels=labels)

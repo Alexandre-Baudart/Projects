@@ -1,6 +1,6 @@
 .cadence
-code/cpp_part
-code/runs
+src/cpp_part
+src/runs
 rapport
 .idea
 __pycache__
@@ -8,4 +8,6 @@ Notes
 Notes_preproc_modeling
 data/Notes_data
 data/__pycache__
-code/dl_part/transformer_part.py
+src/ml_part/libs/isolation_forest.py
+src/ml_part/libs/lgbm.py
+src/ml_part/libs/svm_sgd.py

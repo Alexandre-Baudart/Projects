@@ -31,19 +31,30 @@ def load_csv(file_path: str | None = None, show_info: bool = False) :
     return df
 
 
-def split_data(df, target : str | None = None, dropped_cols: list | None = None, used_cols: list | None = None) :
+def split_data(df, target : str | None = None, dropped_cols: list | None = None, used_cols: list | None = None, train_size = 0.8) :
     if dropped_cols is not None : df = df.drop(columns=dropped_cols)
     if used_cols is not None :
+        used_cols = used_cols.copy()
         if target is not None : used_cols.append(target)
         df = df[used_cols]
-
-    num_cols = df.select_dtypes(include=["number"]).columns
-    df[num_cols] = df[num_cols].fillna(df[num_cols].median())
 
     y = df[target] if target is not None else None
     X = df.drop(columns=target) if target is not None else df
 
-    return X, y
+    X_train, X_test, y_train, y_test = split_set(X, y, train_size=train_size)
+
+    num_cols = X_train.select_dtypes(include=["number"]).columns
+    train_median = X_train[num_cols].median()
+
+    X_train[num_cols] = X_train[num_cols].fillna(train_median)
+    X_test[num_cols] = X_test[num_cols].fillna(train_median)
+
+    X_train = X_train.to_numpy(dtype=np.float32)
+    y_train = y_train.to_numpy(dtype=np.int32)
+    X_test = X_test.to_numpy(dtype=np.float32)
+    y_test = y_test.to_numpy(dtype=np.int32)
+
+    return X_train, X_test, y_train, y_test
 
 
 def split_set(X, y, train_size: float = 0.67) -> list :

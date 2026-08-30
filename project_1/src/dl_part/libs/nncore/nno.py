@@ -30,7 +30,8 @@ def train_(config) :
     train_loader, valid_loader = train_valid_loaders(
         dataset,
         batch_size=config["batch_size"],
-        dataloader_params=config["dataloader_params"]
+        dataloader_params=config["dataloader_params"],
+        use_stratified_split=config["stratified_split"],
     )
 
     model = ray.get(config["model_ref"])
@@ -192,7 +193,7 @@ class NNO :
 
 
     def optimize(self, search_space: dict = None, optim_info: dict = None, lr: float = 1e-3, grace_period: int = 3, reduction_factor: int = 3,
-                 n_samples: int = 5, max_concurrent_trials: int = 1, resources_per_trial: dict = None, verbose: int = 2) :
+                 n_samples: int = 5, max_concurrent_trials: int = 1, resources_per_trial: dict = None, use_stratified_split: bool = False, verbose: int = 2) :
 
         os.environ["OMP_NUM_THREADS"] = "1"
         os.environ["MKL_NUM_THREADS"] = "1"
@@ -218,7 +219,6 @@ class NNO :
                 "model_params": {
                     **search_space
                 },
-
                 "model_ref": model_ref,
                 "batch_size": self.batch_size,
                 "lr": self.lr,
@@ -230,7 +230,8 @@ class NNO :
                 "nn_mode": self.nn_mode,
                 "optimizer_info": self.optim_info,
                 "n_epochs": self.n_epochs,
-                "dataloader_params": self.dataloader_params
+                "dataloader_params": self.dataloader_params,
+                "stratified_split": use_stratified_split,
             },
             num_samples=n_samples,
             scheduler=scheduler,

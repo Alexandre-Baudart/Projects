@@ -10,7 +10,6 @@ Check the PDF report **[here](report.pdf)**.
 
 ## Models Evaluated
 * Logistic Regression
-* Linear SVM (SGD)
 * Random Forest
 * XGBoost
 * MLP
