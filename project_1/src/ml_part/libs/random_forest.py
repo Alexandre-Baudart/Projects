@@ -70,9 +70,6 @@ class RandomForest(Base) :
         self.params = study.best_params
 
     def fit(self, X, y, metric: str = "acc", **kwargs) :
-        self.n_features = X.shape[1]
-        self.classes = np.unique(y)
-
         n_jobs = get_cpu_available()
 
         if not self.params :
@@ -98,6 +95,8 @@ class RandomForest(Base) :
         start_time = time.time()
 
         self.model.fit(X, y)
+
+        # self.classes = self.model.named_steps["model"].classes_
 
         if metric == "auc" or metric == "pr_auc":
             y_pred = self.predict(X, return_probs=True)[:, 1]

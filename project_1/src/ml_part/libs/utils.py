@@ -3,7 +3,6 @@ import random
 import os
 from sklearn.metrics import roc_auc_score, precision_score, recall_score, f1_score, accuracy_score, average_precision_score
 
-
 def metric_config(metric: str = "acc") :
     if metric == "auc" :
         return roc_auc_score, "roc_auc"
@@ -18,10 +17,8 @@ def metric_config(metric: str = "acc") :
     else :
         return accuracy_score, "accuracy"
 
-
 def get_cpu_available() :
     return os.cpu_count() - 2
-
 
 def random_init(seed: int = 42) :
     random.seed(seed)

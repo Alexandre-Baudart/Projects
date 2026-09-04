@@ -79,9 +79,6 @@ class XGBoost(Base) :
         self.params = study.best_params
 
     def fit(self, X, y, metric: str = "acc", **kwargs) :
-        self.n_features = X.shape[1]
-        self.classes = np.unique(y)
-
         X_train, X_valid, y_train, y_valid = split_set(X, y, train_size=0.8)
 
         n_jobs = get_cpu_available()
@@ -117,6 +114,8 @@ class XGBoost(Base) :
         start_time = time.time()
 
         self.model.fit(X_train, y_train, eval_set=[(X_valid, y_valid)], verbose=False)
+
+        # self.classes = self.model.named_steps["model"].classes_
 
         if metric == "auc" or metric == "pr_auc":
             y_pred = self.predict(X, return_probs=True)[:, 1]
