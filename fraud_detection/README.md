@@ -6,7 +6,7 @@ This project focuses on evaluating and comparing different machine learning mode
 The primary challenge addressed is handling the extreme class imbalance typical of fraud datasets to minimize false negatives while 
 maintaining high precision...
 
-Check the PDF report **[here](report.pdf)**.
+Check out the PDF report **[here](report.pdf)**.
 
 ## Models Evaluated
 * Logistic Regression
