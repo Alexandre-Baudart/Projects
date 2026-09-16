@@ -7,3 +7,5 @@ joblib
 numpy
 skops
 xgboost
+matplotlib
+seaborn
