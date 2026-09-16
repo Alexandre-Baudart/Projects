@@ -1,0 +1,10 @@
+.cadence
+report
+.idea
+__pycache__
+Notes
+data/Notes_data
+data/__pycache__
+src/dl/libs/nncore/ennp.py
+src/foundation
+venv_foundation

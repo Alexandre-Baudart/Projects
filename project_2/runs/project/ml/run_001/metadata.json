@@ -1,0 +1,7 @@
+{
+    "run_id": 1,
+    "model": "XGBoost",
+    "target": "target_binary",
+    "created_at": "2026-09-15T19:38:36.599105",
+    "status": "trained"
+}

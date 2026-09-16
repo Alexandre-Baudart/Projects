@@ -1,0 +1,11 @@
+{
+    "name": "project",
+    "paths": {
+        "metadata": "project_metadata.json",
+        "runs": "runs/project/ml"
+    },
+    "default": {
+        "format": "joblib"
+    },
+    "last_run": 2
+}
