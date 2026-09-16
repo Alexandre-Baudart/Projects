@@ -5,6 +5,8 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+API_URL = "https://projects-znbj.onrender.com"
+
 # Titre
 st.title("Heart Disease Prediction Demo")
 
@@ -212,7 +214,7 @@ if st.button("Prédire") :
     # Prediction & probabilities
 
     response = requests.post(
-        "https://heart-disease-ml-project-demo.streamlit.app/ml/predict", # http://127.0.0.1:8000/ml/predict
+        f"{API_URL}/ml/predict", # http://127.0.0.1:8000/ml/predict
         json=payload,
         timeout=10
     )
