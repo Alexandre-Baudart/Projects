@@ -8,4 +8,4 @@ data/__pycache__
 src/dl/libs/nncore/ennp.py
 src/foundation
 venv_foundation
-runs
+runs/
