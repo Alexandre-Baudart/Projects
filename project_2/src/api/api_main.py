@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from src.api.routes import ml
 
 app = FastAPI(
-    title="ML API",
+    title="Project 2 API",
     version="1.0.0",
 )
 
