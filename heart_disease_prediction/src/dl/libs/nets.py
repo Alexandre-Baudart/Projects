@@ -2,58 +2,7 @@ import torch
 import torch.nn as nn
 import math
 
-class TSLayer(nn.Module) :
-    """
-    Temperature Scaling Layer
-    """
-    def __init__(self) :
-        super().__init__()
-        self.log_T = nn.Parameter(torch.zeros(()))
-
-    def forward(self, logits) :
-        T = torch.exp(self.log_T)
-        return logits / T
-
-class MRLCLayer(nn.Module) :
-    """
-    Monotonic Residual Logit Calibration Layer
-    """
-    def __init__(self, n_classes, alpha_max=2.0) :
-        super().__init__()
-
-        self.theta = nn.Parameter(torch.zeros(n_classes))
-        self.alpha_max = alpha_max
-
-    def forward(self, logits) :
-        alpha = self.alpha_max * torch.sigmoid(self.theta) # [0, alpha_max]
-        calibrated_logits = (logits * torch.exp(alpha * torch.tanh(self.theta))) # exp assure la conservation du signe des logits
-
-        return calibrated_logits
-
-class SigmoidCalib(nn.Module) :
-    def __init__(self, n_classes) :
-        super().__init__()
-
-        self.logreg = nn.Sequential(
-            nn.Linear(n_classes, 1),
-            nn.Sigmoid()
-        )
-
-    def forward(self, logits) :
-        return self.logreg(logits)
-
-def calibrate(calib_info: dict | None = None, **kwargs) :
-    if calib_info is not None :
-        method = calib_info.get("method", None)
-
-        if method == "temp" :
-            return TSLayer()
-        elif method == "sigmoid" :
-            return SigmoidCalib(n_classes=kwargs["n_classes"])
-        elif method == "mrlc" :
-            return MRLCLayer(n_classes=kwargs["n_classes"], alpha_max=calib_info.get("alpha_max", 2.0))
-
-    return None
+from .logits_scalers import get_scaling_layer
 
 class MLP(nn.Module) :
     def __init__(self, config) :
@@ -64,7 +13,8 @@ class MLP(nn.Module) :
         n_layers = config["n_layers"]
 
         self.use_skip_connection = config.get("use_skip_connection", False)
-        self.calibrator = calibrate(calib_info=config.get("calib_info", None), n_classes=config["n_classes"])
+
+        self.logits_scaler = get_scaling_layer(scaling_info=config.get("scaling_info", None), n_classes=config["n_classes"])
 
         self.input_bn = nn.BatchNorm1d(input_size)
         self.input_proj = nn.Linear(input_size, hidden_size)
@@ -91,12 +41,34 @@ class MLP(nn.Module) :
             else :
                 x = block(x)
 
-        out = self.out_layer(x)
+        logits = self.out_layer(x)
 
-        if self.calibrator is not None :
-            return self.calibrator(out)
-        else :
-            return out
+        if self.logits_scaler is not None :
+            return self.logits_scaler(logits)
+
+        return logits
+
+    def freeze_mlp(self):
+        for param in self.blocks.parameters():
+            param.requires_grad = False # gradient won't be computed for this param => no modification => frozen
+
+        for param in self.out_layer.parameters():
+            param.requires_grad = False
+
+    def freeze_calibrator(self):
+        for param in self.calibrator.parameters():
+            param.requires_grad = False
+
+    def unfreeze_mlp(self):
+        for param in self.blocks.parameters():
+            param.requires_grad = True
+
+        for param in self.out_layer.parameters():
+            param.requires_grad = True
+
+    def unfreeze_calibrator(self):
+        for param in self.calibrator.parameters():
+            param.requires_grad = True
 
 class TabTransformerV1(nn.Module):
     def __init__(self, config):

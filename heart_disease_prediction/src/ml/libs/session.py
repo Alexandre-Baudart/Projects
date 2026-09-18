@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import final, Literal
 
 from data.dataset import Dataset_
+from .utils import random_init
 
 class MLSession:
     def __init__(self,
@@ -45,9 +46,11 @@ class MLSession:
 
         if self.dataset is not None :
             preprocess_options = preprocess_options or {}
-            self.dataset.apply_preprocessing(target=self.target, **preprocess_options)
+            self.dataset.build_preprocessing(target=self.target, **preprocess_options)
 
         self.config = config
+        random_init(seed=self.config.get("random_seed", 42))
+
         self.mode = self.config.get("mode", "clf_binary")
 
         raw_model = self.config["raw_model"]
@@ -202,7 +205,10 @@ class MLSession:
         if self.dataset is None:
             raise ValueError("A dataset must be provided.")
 
-        X_search, y_search = self.dataset.get_optim_set(search_set_size=self.config["optim"].get("search_set_size", 0.3))
+        X_search, y_search = self.dataset.get_optim_set(
+            target=self.target,
+            search_set_size=self.config["optim"].get("search_set_size", 0.3)
+        )
 
         results = self.model_.optimize(X_search, y_search, self.config["optim"].get("metric", "acc"), **kwargs)
 
@@ -217,12 +223,18 @@ class MLSession:
         if self.dataset is None:
             raise ValueError("A dataset must be provided.")
 
-        X_train, y_train = self.dataset.get_train_set()
+        X_train, y_train = self.dataset.get_train_set(target=self.target)
+
+        if calibrate:
+            X_calib, y_calib = self.dataset.get_calib_set(target=self.target)
+        else:
+            X_calib, y_calib = None, None
 
         results = self.model_.fit(
             X=X_train, y=y_train,
-            calibrate=calibrate,
             metric=self.config["train"].get("metric", "acc"),
+            calibrate=calibrate,
+            calib_set=(X_calib, y_calib),
             get_features_importance=get_features_importance
         )
 
@@ -232,7 +244,12 @@ class MLSession:
                 format_=kwargs.get("format_", "joblib")
             )
 
-            self.run_metadata["status"] = "trained" if not calibrate else "trained + calibrated"
+            self.run_metadata["status"] = "trained"
+
+            if calibrate:
+                self.run_metadata["calibration"] = "sigmoid"
+                self.run_metadata["status"] = "calibrated"
+
             self._save_metadata(type_="run")
 
             self._save_run_json(
@@ -241,15 +258,22 @@ class MLSession:
             )
 
     @final
-    def cross_validate(self, **kwargs) :
+    def cross_validate(self, calibrate: bool = False, **kwargs) :
         if self.dataset is None:
             raise ValueError("A dataset must be provided.")
 
-        X_train, y_train = self.dataset.get_train_set()
+        X_train, y_train = self.dataset.get_train_set(target=self.target)
+
+        if calibrate:
+            X_calib, y_calib = self.dataset.get_calib_set(target=self.target)
+        else:
+            X_calib, y_calib = None, None
 
         self.model_.cross_validate(
             X=X_train,
             y=y_train,
+            calibrate=calibrate,
+            calib_set=(X_calib, y_calib),
             **self.config["cv"],
             **kwargs
         )
@@ -267,7 +291,7 @@ class MLSession:
         if metrics is None:
             metrics = ["acc", "precision", "recall", "f1-score", "auc", "pr_auc"]
 
-        X_test, y_test = self.dataset.get_test_set()
+        X_test, y_test = self.dataset.get_test_set(target=self.target)
 
         results = self.model_.test(
             X_test, y_test,
@@ -288,7 +312,7 @@ class MLSession:
         if self.dataset is None:
             raise ValueError("A dataset must be provided.")
 
-        X_test, y_test = self.dataset.get_test_set()
+        X_test, y_test = self.dataset.get_test_set(target=self.target)
 
         res, gap = self.model_.check_high_confidence_bias(X_test, y_test, **kwargs)
 
@@ -302,7 +326,7 @@ class MLSession:
         if self.dataset is None:
             raise ValueError("A dataset must be provided.")
 
-        X, _ = self.dataset.get_test_set()
+        X, _ = self.dataset.get_test_set(target=self.target)
 
         results = self.model_.benchmark(X, n_iterations=self.config["benchmark"].get("n_iterations", 100))
 
@@ -317,7 +341,7 @@ class MLOrchestrator:
         self.session_args = session_args
         self.sess_models = self.session_args["model_config"].keys()
 
-        self.ACTION_ORDER = ["optimize", "cross_validate", "train", "test", "check_high_confidence_bias", "benchmark"]
+        self.ACTION_ORDER = ["optimize", "train", "test", "cross_validate", "check_high_confidence_bias", "benchmark"]
         self.ACTION_DEPENDENCIES = {
             "test": ["train"],
             "check_high_confidence_bias": ["train"],
@@ -446,7 +470,7 @@ class MLOrchestrator:
                 self.session.optimize()
 
             elif action == "cross_validate":
-                self.session.cross_validate()
+                self.session.cross_validate(calibrate=self.args.calibrate)
 
             elif action == "train":
                 self.session.train(

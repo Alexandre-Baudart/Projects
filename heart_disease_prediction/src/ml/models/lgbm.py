@@ -106,14 +106,18 @@ class LGBM(Base) :
                        X, y,
                        metric: Literal["acc", "precision", "recall", "f1-score", "auc", "pr_auc"] = "acc",
                        n_splits: int = 5,
+                       calibrate: bool = False,
+                       calib_set: tuple | list | None = None,
                        **kwargs):
 
-        self._cross_validate(LGBMClassifier, X, y, metric, n_splits=n_splits)
+        self._cross_validate(LGBMClassifier, X, y, metric, n_splits=n_splits, calibrate=calibrate, calib_set=calib_set)
 
     def fit(self,
             X, y,
             metric: Literal["acc", "precision", "recall", "f1-score", "auc", "pr_auc"] = "acc",
             calibrate: bool = False,
+            calib_set: tuple | list | None = None,
+            decision_threshold: float = 0.5,
             **kwargs) :
 
         n_jobs = get_cpu_available()
@@ -150,8 +154,11 @@ class LGBM(Base) :
         # self.n_features = len(self.model.named_steps["preprocess"].get_feature_names_out())
 
         if calibrate:
-            calib_method = kwargs.get("calib_method", "sigmoid")
-            self._calibrate(X_calib, y_calib, calib_method=calib_method)
+            if calib_set is not None:
+                X_calib, y_calib = calib_set
+                calib_method = kwargs.get("calib_method", "sigmoid")
+
+                self._calibrate(X_calib, y_calib, calib_method=calib_method)
 
         elapsed = time.time() - start_time
 

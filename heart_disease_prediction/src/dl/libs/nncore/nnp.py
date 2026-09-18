@@ -22,8 +22,8 @@ from ..utils import (
     train_valid_loaders,
     metric_config,
     to_loader,
-    brier_score,
-    ECE
+    ECE,
+    BrierScore
 )
 from ..callbacks import TimeMeasuring, TrainResultsMonitoring, BestModelCallback, CheckpointCallback, \
     ProgressiveUnfreezingCallback
@@ -123,7 +123,7 @@ class NNP:
 
         return score
 
-    def train(self, dataset=None, n_epochs: int = 10, lr: float = 1e-3, optimizer = None,
+    def train(self, dataset=None, n_epochs: int = 10, lr: float | None = None, optimizer = None,
               accumulate_grad_batches: int = 1,
               clip_grad_norm: bool = False, batch_proc_fn = None,
               use_ema: bool = False, ema_decay: float = 0.999,
@@ -138,12 +138,17 @@ class NNP:
             raise ValueError("A train dataset must be provided!")
 
         # preprocess = dataset.get_preprocess() if hasattr(dataset, "get_preprocess") else None
-        self.lr = lr
+
+        if self.lr is None and lr is None:
+            self.lr = 1e-3
+        elif self.lr is None and lr is not None:
+            self.lr = lr
+
         self.batch_proc_fn = batch_proc_fn
 
-        if optimizer is None:
+        if self.optimizer is None and optimizer is None:
             raise ValueError("An optimizer must be provided!")
-        else:
+        elif self.optimizer is None and optimizer is not None:
             self.optimizer = optimizer
 
         if use_ema and self.model_ema is None:
@@ -166,7 +171,7 @@ class NNP:
                 self.model,
                 self.optimizer,
                 self.batch_size,
-                self.callbacks["scheduler"],
+                self.callbacks["scheduler"] if "scheduler" in self.callbacks else None,
                 self.history,
                 self.model_ema,
                 save_root
@@ -178,7 +183,7 @@ class NNP:
                 # preprocess,
                 self.optimizer,
                 self.batch_size,
-                self.callbacks["scheduler"],
+                self.callbacks["scheduler"] if "scheduler" in self.callbacks else None,
                 self.history,
                 self.model_ema,
                 save_root
@@ -187,7 +192,7 @@ class NNP:
         for cb in self.callbacks.values():
             cb.on_train_begin()
 
-        print("\n=== Training ===")
+        print(f"\n=== Training: {self.model.__class__.__name__} ===")
 
         for epoch in range(self.last_epoch, n_epochs):
             try:
@@ -199,7 +204,7 @@ class NNP:
 
                 print(f"\nEpoch {epoch + 1}/{n_epochs} : \n")
 
-                with torch.enable_grad():
+                with torch.enable_grad(): # activate the gradient graph building
                     for batch, (inputs, targets) in enumerate(track(self.train_loader, description="Training...")):
                         if self.use_gpu:
                             inputs, targets = inputs.to(self.device, memory_format=self.memory_format,
@@ -329,7 +334,7 @@ class NNP:
         else:
             loader = self.valid_loader
 
-        return_probs = True if self.metric in ["AUC", "PR-AUC"] else False
+        return_probs = True if self.metric in ["AUC", "PR-AUC", "Brier-Score"] else False
 
         with torch.no_grad():
             for inputs, targets in track(loader, description=track_description):
@@ -388,7 +393,7 @@ class NNP:
             loader = to_loader(dataset, batch_size=self.batch_size)
 
         if track_description == "Inferencing...":
-            print("\n=== Inference ===\n")
+            print(f"\n=== Inference: {self.model.__class__.__name__} ===\n")
 
         with torch.inference_mode():
             for batch in track(loader, description=track_description):
@@ -464,15 +469,19 @@ class NNP:
                  save_root: str | None = None,
                  track_description: str = "Evaluating..."):
 
-        if metrics is None:
-            if self.mode in ["clf_binary", "clf_multiclass", "clf_multilabel"]:
+        if self.mode in ["clf_binary", "clf_multiclass", "clf_multilabel"]:
+            if metrics is None:
                 metrics = ["acc", "precision", "recall", "f1-score", "auc", "pr_auc"]
-            else:
+
+            if calib_eval:
+                metrics.extend(["nll", "brier_score", "ece"])
+        else:
+            if metrics is None:
                 metrics = ["mae", "rmse"]
 
         results = {}
 
-        print("\n=== Evaluation ===\n")
+        print(f"\n=== Evaluation: {self.model.__class__.__name__} ===\n")
 
         y_true = dataset.get_labels(dtype=torch.int32)
         y_pred, y_prob = self.predict(dataset, return_probs=True, track_description=track_description)
@@ -490,21 +499,14 @@ class NNP:
                 metric_info["metric"] = metric
                 score_fn, metric_name = metric_config(mode=self.mode, metric_info=metric_info)
 
-                if metric == "auc" or metric == "pr_auc":
+                if metric in ("auc", "pr_auc", "nll", "brier_score", "ece"):
                     results[metric_name] = float(score_fn(y_prob, y_true))
                 else:
                     results[metric_name] = float(score_fn(y_pred, y_true))
 
-            print(f"\nEvaluation results :")
+            print(f"\nResults :")
             for metric, score in results.items():
                 print(f"\t{metric} : {score:.4f}")
-
-            if calib_eval :
-                results["NLL"] = log_loss(y_true, y_prob)
-                results["Brier-Score"] = brier_score(y_true, y_prob, self.mode)
-                results["ECE"] = ECE(y_true, y_prob)
-
-                print(f"\nNLL : {results["NLL"]:.4f}\nBrier-Score : {results["Brier-Score"]:.4f}\nECE : {results["ECE"]:.4f}")
 
             if conf_matrix:
                 self._display_conf_matrix(
@@ -556,7 +558,7 @@ class NNP:
         import time
         import numpy as np
 
-        print("\n=== Benchmark ===\n")
+        print(f"\n=== Benchmark: {self.model.__class__.__name__} Benchmark ===\n")
 
         # Warm-up
         for _ in range(10):
@@ -638,24 +640,25 @@ class NNP:
             preprocess = None
         """
 
-        ckpt_stuff = {
-            # "preprocess": preprocess,
-            "last_epoch": ckpt.get("last_epoch", 0),
-            "lr": ckpt.get("lr", None),
-            "optimizer": ckpt.get("optimizer", None),  # optimizer.load_state_dict(ckpt_stuff["optimizer"])
-            "scheduler": ckpt.get("scheduler", None),  # callbacks.scheduler.load_state_dict(ckpt_stuff["scheduler"])
-        }
-
-        print("\nNote: Model has been loaded with success!")
-
-        return cls(
+        nnp = cls(
             model=model,
             batch_size=batch_size,
             criterion=criterion,
             metric_info=metric_info,
             dataloader_params=dataloader_params,
-            device=device,
-        ), ckpt_stuff
+            device=device
+        )
+
+        nnp.last_epoch = ckpt.get("last_epoch", 0)
+        nnp.lr = ckpt.get("lr", None)
+        nnp.optimizer = ckpt.get("optimizer", None) # optimizer.load_state_dict(ckpt_stuff["optimizer"])
+        nnp.callbacks = {
+            "scheduler": ckpt.get("scheduler", None) # callbacks.scheduler.load_state_dict(ckpt_stuff["scheduler"])
+        }
+
+        print("\nNote: Model has been loaded with success!")
+
+        return nnp
 
     @final
     def load_history(self, history_path: str | None = None):
@@ -723,4 +726,11 @@ class NNP:
 
             print("Model has been exported to onnx with success !\n")
 
+    def has_optimizer(self) -> bool:
+        return self.optimizer is not None
 
+    def has_scheduler(self) -> bool:
+        if self.callbacks is not None:
+            return "scheduler" in self.callbacks
+
+        return False

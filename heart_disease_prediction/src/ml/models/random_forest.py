@@ -80,14 +80,17 @@ class RandomForest(Base) :
                        X, y,
                        metric: Literal["acc", "precision", "recall", "f1-score", "auc", "pr_auc"] = "acc",
                        n_splits: int = 5,
+                       calibrate: bool = False,
+                       calib_set: tuple | list | None = None,
                        **kwargs):
 
-        self._cross_validate(RandomForestClassifier, X, y, metric, n_splits=n_splits)
+        self._cross_validate(RandomForestClassifier, X, y, metric, n_splits=n_splits, calibrate=calibrate, calib_set=calib_set)
 
     def fit(self,
             X, y,
             metric: Literal["acc", "precision", "recall", "f1-score", "auc", "pr_auc"] = "acc",
             calibrate: bool = False,
+            calib_set: tuple | list | None = None,
             decision_threshold: float = 0.5,
             get_features_importance: bool = False,
             **kwargs):
@@ -97,12 +100,6 @@ class RandomForest(Base) :
         if not self.params :
             X_search, _, y_search, _ = split_set(X, y, train_size=0.3)
             self.optimize(X_search, y_search, metric)
-
-        if calibrate:
-            X_train, X_calib, y_train, y_calib = split_set(X, y, train_size=0.9)
-        else:
-            X_train = X
-            y_train = y
 
         self.model_ = self._build_pipeline(
             model=RandomForestClassifier(
@@ -118,14 +115,17 @@ class RandomForest(Base) :
 
         start_time = time.perf_counter()
 
-        self.model_.fit(X_train, y_train)
+        self.model_.fit(X, y)
 
         # self.classes = self.model.named_steps["model"].classes_
         # self.n_features = len(self.model.named_steps["preprocess"].get_feature_names_out())
 
         if calibrate:
-            calib_method = kwargs.get("calib_method", "sigmoid")
-            self._calibrate(X_calib, y_calib, calib_method=calib_method)
+            if calib_set is not None:
+                X_calib, y_calib = calib_set
+                calib_method = kwargs.get("calib_method", "sigmoid")
+
+                self._calibrate(X_calib, y_calib, calib_method=calib_method)
 
         if metric == "auc" or metric == "pr_auc":
             y_pred = self.predict(X, return_probs=True, threshold=decision_threshold)

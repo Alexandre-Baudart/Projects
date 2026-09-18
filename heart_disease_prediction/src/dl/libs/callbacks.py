@@ -36,10 +36,10 @@ class TrainResultsMonitoring(Callback) :
             self.best_valid_score = valid_score
 
         if train_score == -1 or valid_score == -1 :
-            print(f"\n~ Train loss : {train_loss:.4f} - Val loss : {valid_loss:.4f}~")
+            print(f"\n~ Train loss : {train_loss:.4f} - Valid loss : {valid_loss:.4f}~")
         else :
-            print(f"\n~ Train {metric} : {train_score:.4f} - Val {metric} : {valid_score:.4f} "
-                  f"- Train loss : {train_loss:.4f} - Val loss : {valid_loss:.4f} ~")
+            print(f"\n~ Train {metric} : {train_score:.4f} - Valid {metric} : {valid_score:.4f} "
+                  f"- Train loss : {train_loss:.4f} - Valid loss : {valid_loss:.4f} ~")
 
     def on_train_end(self):
         return float(self.best_train_score), float(self.best_valid_score)
@@ -214,7 +214,7 @@ class BestModelCallback(Callback) :
             "model": {k: v.cpu() for k, v in self.best_model.items()}, # envoi de tous les poids du modèle sur CPU pour la sauvegarde
             "batch_size": self.batch_size,
             "optimizer": self.optimizer.state_dict(),
-            "scheduler": self.scheduler.state_dict(),
+            "scheduler": self.scheduler.state_dict() if self.scheduler is not None else None,
             "best_valid_loss": self.best_valid_loss,
             "lr": self.best_lr
         }
@@ -276,7 +276,7 @@ class CheckpointCallback(Callback) :
             "model": {k: v.cpu() for k, v in self.model.state_dict().items()},
             "batch_size": self.batch_size,
             "optimizer": self.optimizer.state_dict(),
-            "scheduler": self.scheduler.state_dict(),
+            "scheduler": self.scheduler.state_dict() if self.scheduler is not None else None,
             "best_valid_loss": valid_loss,
         }
 

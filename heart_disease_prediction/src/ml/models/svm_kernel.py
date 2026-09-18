@@ -176,6 +176,8 @@ class KernelSVM(Base) :
                        X, y,
                        metric: Literal["acc", "precision", "recall", "f1-score", "auc", "pr_auc"] = "acc",
                        n_splits: int = 5,
+                       calibrate: bool = False,
+                       calib_set: tuple | list | None = None,
                        **kwargs):
 
             score_fn, metric_name = metric_config(metric)
@@ -209,6 +211,13 @@ class KernelSVM(Base) :
 
                 model.fit(X.iloc[train_idx], y.iloc[train_idx])
 
+                if calibrate:
+                    if calib_set is not None:
+                        X_calib, y_calib = calib_set
+                        calib_method = kwargs.get("calib_method", "sigmoid")
+
+                        self._calibrate(X_calib, y_calib, calib_method=calib_method)
+
                 if metric == "auc" or metric == "pr_auc":
                     preds = model.decision_function(X.iloc[valid_idx])
                 else:
@@ -221,20 +230,15 @@ class KernelSVM(Base) :
             std = float(np.std(scores))
 
             print(
-                f"\nCross validation results : \n\tmean ({metric_name}) : {mean:.4f} \n\tstd ({metric_name}) : {std:.4f}")
+                f"\nCross validation results : \n\tMean ({metric_name}) : {mean:.4f} \n\tStd ({metric_name}) : {std:.4f}")
 
     def fit(self,
             X, y,
             metric: Literal["acc", "precision", "recall", "f1-score", "auc", "pr_auc"] = "acc",
             calibrate: bool = False,
+            calib_set: tuple | list | None = None,
             decision_threshold: float = 0.5,
             **kwargs) :
-
-        if calibrate:
-            X_train, X_calib, y_train, y_calib = split_set(X, y, train_size=0.9)
-        else:
-            X_train = X
-            y_train = y
 
         if not self.params :
             X_search, _, y_search, _ = split_set(X, y, train_size=0.3)
@@ -248,8 +252,6 @@ class KernelSVM(Base) :
         else:
             params["gamma"] = "scale"
 
-        params["probability"] = kwargs.get("probability", False)
-
         params = {k: v for k, v in params.items() if k != "sigma"}
 
         if self.use_pca :
@@ -257,19 +259,35 @@ class KernelSVM(Base) :
         if self.use_nystroem :
             self.nystroem = Nystroem(n_components=self.n_components)
 
-        self.model_ = self._build_pipeline(model=SVC(tol=1e-2, random_state=42, verbose=0, **params), pca=self.pca, nystroem=self.nystroem)
+        self.model_ = self._build_pipeline(
+            model=SVC(
+                tol=1e-2,
+                probability=True,
+                random_state=42,
+                verbose=0,
+                **params
+            ),
+            pca=self.pca,
+            nystroem=self.nystroem
+        )
 
         print("\n=== Training ===")
 
         start_time = time.time()
 
-        self.model_.fit(X_train, y_train)
+        self.model_.fit(X, y)
 
         if calibrate:
-            calib_method = kwargs.get("calib_method", "sigmoid")
-            self._calibrate(X_calib, y_calib, calib_method=calib_method)
+            if calib_set is not None:
+                X_calib, y_calib = calib_set
+                calib_method = kwargs.get("calib_method", "sigmoid")
 
-        y_pred = self.predict(X, threshold=decision_threshold)
+                self._calibrate(X_calib, y_calib, calib_method=calib_method)
+
+        if metric == "auc" or metric == "pr_auc":
+            y_pred = self.predict(X, return_probs=True, threshold=decision_threshold)
+        else:
+            y_pred = self.predict(X, threshold=decision_threshold)
 
         score_fn, metric_name = metric_config(metric)
         score = self._score(y, y_pred, score_fn=score_fn, metric=metric_name)

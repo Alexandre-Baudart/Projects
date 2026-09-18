@@ -1,4 +1,3 @@
-from .libs.utils import *
 from data.dataset import Dataset_
 
 from .models.svm_kernel import KernelSVM
@@ -22,6 +21,7 @@ METADATA = {
 }
 
 config = {
+    "random_seed": 42,
     "mode": "clf_binary",
 
     "optim": {
@@ -40,7 +40,7 @@ config = {
 
     "test": {
         "metrics": ["acc", "precision", "recall", "f1-score", "auc", "pr_auc"],
-        "calib_eval": False
+        "calib_eval": True
     },
 
     "benchmark": {
@@ -53,8 +53,8 @@ model_config = {
         "raw_model": LogisticReg,
 
         "params": {
-            'C': 0.64,
-            "tol": 1e-4
+            'C': 0.74,
+            "tol": 2e-4
         },
 
         "preprocess": {
@@ -66,10 +66,11 @@ model_config = {
         "raw_model": KernelSVM,
 
         "params": {
-            'C': 3.62,
-            "sigma": 5.08,
-            "degree": 2,
-            "coef0": 1
+            "kernel": "rbf",
+            'C': 4.19,
+            "sigma": 3.9,
+            "degree": 4,
+            "coef0": 0
         },
 
         "preprocess": {
@@ -81,11 +82,11 @@ model_config = {
         "raw_model": RandomForest,
 
         "params": {
-            "n_estimators": 499,
-            "max_depth": 10,
-            "min_samples_split": 2,
+            "n_estimators": 307,
+            "max_depth": 9,
+            "min_samples_split": 3,
             "min_samples_leaf": 2,
-            "max_samples": 0.57
+            "max_samples": 0.70
         },
 
         "preprocess": {
@@ -97,14 +98,14 @@ model_config = {
         "raw_model": XGBoost,
 
         "params": {
-            "n_estimators": 1396,
-            "learning_rate": 0.08,
-            "max_depth": 9,
-            "min_child_weight": 1,
-            "subsample": 0.82,
-            "colsample_bytree": 0.97,
-            "reg_alpha": 9e-2,
-            "reg_lambda": 1.13
+            "n_estimators": 900,
+            "learning_rate": 0.09,
+            "max_depth": 6,
+            "min_child_weight": 2,
+            "subsample": 0.80,
+            "colsample_bytree": 0.84,
+            "reg_alpha": 0.11,
+            "reg_lambda": 0.01
         },
 
         "preprocess": {
@@ -116,10 +117,11 @@ model_config = {
         "raw_model": CatBoost,
 
         "params": {
-            "n_estimators": 2729,
-            "learning_rate": 0.05,
+            "n_estimators": 1881,
+            "learning_rate": 0.07,
             "depth": 4,
-            "l2_leaf_reg": 1.43,
+            "l2_leaf_reg": 0.02,
+            "cat_features": ["sex", "cp", "fbs", "restecg", "exang", "slope", "ca", "thal"]
         },
 
         "preprocess": {
@@ -130,18 +132,28 @@ model_config = {
 }
 
 if __name__ == "__main__" :
-    random_init(seed=42)
+    # random_init(seed=42)
 
-    dataset = Dataset_(train_size=0.8)
-    dataset.load_csv(data_path="data/heart_disease_uci.csv", dropped_cols=["id", "dataset"])
-    dataset.binarize_target(old_target="num", new_target="target_binary", bin_threshold=0)
+    dataset = Dataset_(
+        data_path="data/datasets/heart_disease_uci.csv",
+        train_path="data/datasets/heart_disease_uci_train.csv",
+        calib_path="data/datasets/heart_disease_uci_calib.csv",
+        test_path="data/datasets/heart_disease_uci_test.csv",
+        dropped_cols=["id", "dataset"],
+        binarization_info={
+            "old_target": "num",
+            "new_target": "target_binary",
+            "bin_threshold": 0
+        }
+    )
+    # dataset.split_data_csv(train_size=0.8, calib_size=0.1, target="target_binary")
 
     session_args = {
         "model_config": model_config,
         "dataset": dataset,
         "config": config,
         "target": "target_binary",
-        "metadata": METADATA
+        "metadata": None
     }
 
     orch = MLOrchestrator(

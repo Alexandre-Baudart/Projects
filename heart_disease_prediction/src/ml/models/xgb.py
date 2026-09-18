@@ -109,14 +109,79 @@ class XGBoost(Base) :
                        X, y,
                        metric: Literal["acc", "precision", "recall", "f1-score", "auc", "pr_auc"] = "acc",
                        n_splits: int = 5,
-                       **kwargs) :
+                       calibrate: bool = False,
+                       calib_set: tuple | list | None = None,
+                       **kwargs):
 
-        self._cross_validate(XGBClassifier, X, y, metric, n_splits=n_splits)
+        n_jobs = get_cpu_available()
+        score_fn, metric_name = metric_config(metric)
+
+        if calibrate:
+            X_train, X_calib, y_train, y_calib = split_set(X, y, train_size=0.9)
+        else:
+            X_train = X
+            y_train = y
+
+        if metric == "acc" :
+            eval_metric = "error"
+        elif metric == "pr_auc" :
+            eval_metric = "aucpr"
+        else :
+            eval_metric = metric
+
+        cv = StratifiedKFold(
+            n_splits=n_splits,
+            shuffle=True,
+            random_state=42,
+        )
+
+        print("\n=== Cross Validation ===")
+
+        scores = []
+
+        for train_idx, valid_idx in cv.split(X_train, y_train):
+            X_cv, X_valid = X_train.iloc[train_idx], X_train.iloc[valid_idx]
+            y_cv, y_valid = y_train.iloc[train_idx], y_train.iloc[valid_idx]
+
+            preprocess = clone(self.preprocess)
+
+            X_cv_t = preprocess.fit_transform(X_cv, y_cv)
+            X_valid_t = preprocess.transform(X_valid)
+
+            model = XGBClassifier(
+                early_stopping_rounds=50,
+                eval_metric=eval_metric,
+                n_jobs=n_jobs,
+                random_state=42,
+                verbosity=0,
+                **self.params
+            )
+
+            model.fit(X_cv_t, y_cv, eval_set=[(X_valid_t, y_valid)], verbose=False)
+
+            if calibrate:
+                if calib_set is not None:
+                    X_calib, y_calib = calib_set
+                    calib_method = kwargs.get("calib_method", "sigmoid")
+
+                    self._calibrate(X_calib, y_calib, calib_method=calib_method)
+
+            if metric == "auc" or metric == "pr_auc":
+                y_pred = model.predict_proba(X_valid_t)[:, 1]
+            else:
+                y_pred = model.predict(X_valid_t)
+
+            s = score_fn(y_valid, y_pred)
+            scores.append(s)
+
+        print(
+            f"\nCross validation results : \n\tMean ({metric}) : {np.mean(scores):.4f} \n\tStd ({metric}) : {np.std(scores):.4f}")
 
     def fit(self,
             X, y,
             metric: Literal["acc", "precision", "recall", "f1-score", "auc", "pr_auc"] = "acc",
             calibrate: bool = False,
+            calib_set: tuple | list | None = None,
             decision_threshold: float = 0.5,
             get_features_importance: bool = False,
             **kwargs) :
@@ -162,8 +227,11 @@ class XGBoost(Base) :
         # self.n_features = len(self.model_.named_steps["preprocess"].get_feature_names_out())
 
         if calibrate:
-            calib_method = kwargs.get("calib_method", "sigmoid")
-            self._calibrate(X_calib, y_calib, calib_method=calib_method)
+            if calib_set is not None:
+                X_calib, y_calib = calib_set
+                calib_method = kwargs.get("calib_method", "sigmoid")
+
+                self._calibrate(X_calib, y_calib, calib_method=calib_method)
 
         if metric == "auc" or metric == "pr_auc":
             y_pred = self.predict(X, return_probs=True, threshold=decision_threshold)

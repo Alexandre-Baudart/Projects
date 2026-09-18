@@ -1,9 +1,13 @@
 import joblib
 import os
+from typing import Literal
 import torch
 import numpy as np
 from torch.utils.data import Dataset
 from sklearn.model_selection import StratifiedShuffleSplit, ShuffleSplit
+
+from data.dataset import Dataset_
+from .libs.utils import split_set
 
 def to_numpy(data, dtype=np.float32):
     if hasattr(data, "to_numpy"):
@@ -33,17 +37,37 @@ def split_indices(labels, ratio: float = 0.2, use_stratified_split: bool = False
     return train_idx, valid_idx
 
 class ProjectTrainDataset:
-    def __init__(
-            self,
-            X, y,
-            preprocess = None,
+    def __init__(self,
+            dataset: Dataset_,
+            target: str,
+            preprocess_path: str | None = None,
+            task: Literal["optim", "train", "calib"] = "train",
             valid_ratio: float = 0.2,
-            use_stratified_split: bool = False
-    ) :
-        self.preprocess_ = preprocess
+            use_stratified_split: bool = False) :
 
-        y = to_numpy(y).ravel()
-        self.classes = np.unique(y)
+        self.dataset = dataset
+        self.task = task
+        self.classes = self.dataset.get_classes(target=target)
+
+        self.preprocess_ = None
+        self._load_preprocess_(preprocess_path)
+
+        X_for_fit = None
+        y_for_fit = None
+
+        if task == "train":
+            X, y = self.dataset.get_train_set(target=target)
+            X_for_fit = X
+            y_for_fit = y
+        elif task == "optim":
+            X, y = self.dataset.get_train_set(target=target)
+
+            X_for_fit = X
+            y_for_fit = y
+
+            _, X, _, y = split_set(X, y, train_size=0.3)
+        else:
+            X, y = self.dataset.get_calib_set(target=target)
 
         train_idx, valid_idx = split_indices(
             labels=y,
@@ -53,19 +77,32 @@ class ProjectTrainDataset:
 
         X_train = X.iloc[train_idx].copy()
         X_valid = X.iloc[valid_idx].copy()
-        y_train = y[train_idx]
-        y_valid = y[valid_idx]
+        y_train = y.iloc[train_idx]
+        y_valid = y.iloc[valid_idx]
 
         if self.preprocess_ is not None:
-            self.preprocess_.fit(X_train, y_train)
+            if task == "train" or task == "optim":
+                self.preprocess_.fit(X_for_fit, y_for_fit)
 
             X_train = self.preprocess_.transform(X_train)
             X_valid = self.preprocess_.transform(X_valid)
 
         self.X_train = to_tensor(X_train)
-        self.X_valid = to_tensor(X_valid)
         self.y_train = to_tensor(y_train).unsqueeze(-1)
+        self.X_valid = to_tensor(X_valid)
         self.y_valid = to_tensor(y_valid).unsqueeze(-1)
+
+    def _load_preprocess_(self, path: str | None = None):
+        if path is not None:
+            process_path = os.path.join(path, "preprocess_.joblib")
+
+            if os.path.exists(path):
+                preprocess_ = joblib.load(process_path)
+                print("\nNote: preprocess_ loaded with success!")
+
+                self.preprocess_ = preprocess_
+
+        self.preprocess_ = self.dataset.get_preprocess()
 
     def get_preprocess_(self) :
         return self.preprocess_
@@ -76,7 +113,7 @@ class ProjectTrainDataset:
     def get_n_classes(self):
         n_classes = len(self.classes)
 
-        return n_classes if n_classes > 1 else 1
+        return n_classes if n_classes > 2 else 1
 
     def get_tab_transformer_stuff(self) :
         ct = self.preprocess_.named_steps["column_transformer"]
@@ -104,18 +141,17 @@ class ProjectTrainDataset:
     def __len__(self):
         return len(self.X_train)
 
-def load_preprocess_(path: str | None = None) :
-    preprocess_ = None
-
-    if path is not None:
-        preprocess_ = joblib.load(os.path.join(path, "preprocess_.joblib"))
-        print("\nNote: preprocess_ loaded with success!")
-
-    return preprocess_
-
 class ProjectTestDataset(Dataset) :
-    def __init__(self, X, y, preprocess = None):
-        self.preprocess_ = preprocess
+    def __init__(self,
+            dataset: Dataset_,
+            target: str,
+            preprocess_ = None):
+
+        self.dataset = dataset
+
+        self.preprocess_ = preprocess_
+
+        X, y = dataset.get_test_set(target=target)
 
         if self.preprocess_ is not None:
             X_t = self.preprocess_.transform(X)
@@ -135,6 +171,18 @@ class ProjectTestDataset(Dataset) :
         y = self.y[index]
 
         return X, y
+
+    def load_preprocess_(self, path: str | None = None):
+        if path is not None:
+            process_path = os.path.join(path, "preprocess_.joblib")
+
+            if os.path.exists(path):
+                preprocess_ = joblib.load(process_path)
+                print("\nNote: preprocess_ loaded with success!")
+
+                self.preprocess_ = preprocess_
+
+        self.preprocess_ = self.dataset.get_preprocess()
 
     def set_preprocess_(self, preprocess_):
         self.preprocess_ = preprocess_

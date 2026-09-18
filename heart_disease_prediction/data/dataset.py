@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pandas as pd
 import numpy as np
 from typing import Literal
@@ -11,65 +13,125 @@ def to_numpy(data, dtype=np.float32):
 
     return np.asarray(data, dtype=dtype)
 
+def split_df(df, train_size: float = 0.8, target: str | None = None) :
+    return train_test_split(df, train_size=train_size, random_state=42, stratify=df[target])
+
 def split_set(X, y, train_size: float = 0.80) :
     return train_test_split(X, y, train_size=train_size, random_state=42, stratify=y)
 
 class Dataset_ :
-    def __init__(self, train_size: float = 0.8, ) :
-        self.df = None
+    def __init__(self,
+                 data_path: str | None = None,
+                 train_path: str | None = None,
+                 calib_path: str | None = None,
+                 test_path: str | None = None,
+                 dropped_cols: list | None = None,
+                 binarization_info: dict | None = None,
+                 show_df_info: bool = False) :
 
-        self.train_size = train_size
+        self.data_path = data_path
+        self.train_path = train_path
+        self.calib_path = calib_path
+        self.test_path = test_path
+
+        self.dropped_cols = dropped_cols
+        self.bin_info = binarization_info
+        self.show_df_info = show_df_info
+
+        self.data_df = None
+        self.train_df = None
+        self.calib_df = None
+        self.test_df = None
 
         self.preprocessor = None
         self.preprocess = None
 
-        self.X_train = None
-        self.X_test = None
-        self.y_train = None
-        self.y_test = None
+    def split_data_csv(self, target: str | None = None, train_size: float = 0.8, calib_size: float = 0.0):
+        if self.data_path is not None:
+            data_path = Path(self.data_path)
+            root = data_path.parent
 
-    def load_csv(self, data_path: str | None = None, show_info: bool = False, dropped_cols: list | None = None) -> None :
+            filename = data_path.stem
+
+            train_filename = filename + "_train.csv"
+            train_path = root / train_filename
+            test_filename = filename + "_test.csv"
+            test_path = root / test_filename
+
+            if train_path.exists() and test_path.exists():
+                return
+            else:
+                data_df = self._load_csv(data_path, no_drop_cols=True)
+                data_df = self._binarize_target(data_df)
+
+                train_df, test_df = split_df(data_df, train_size=train_size, target=target)
+
+                if calib_size > 0.0:
+                    calib_filename = filename + "_calib.csv"
+                    calib_path = root / calib_filename
+
+                    train_df, calib_df = split_df(data_df, train_size=1-calib_size, target=target)
+
+                    calib_df.to_csv(calib_path, index=False, encoding="utf-8")
+                    
+                train_df.to_csv(train_path, index=False, encoding="utf-8")
+                test_df.to_csv(test_path, index=False, encoding="utf-8")
+
+    def _load_csv(self, path: str | Path | None = None, no_drop_cols: bool = False) :
         df = None
 
-        if data_path is not None:
+        if path is not None:
             try:
-                df = pd.read_csv(data_path)
+                df = pd.read_csv(path)
                 assert df is not None
 
                 if not df.empty:
-                    if show_info:
+                    if self.show_df_info:
                         print("\nSome information about the dataset :\n")
                         print(df.info())  # types des variables
                         print(df.describe())  # statistiques descriptives
                         print(df.columns)  # noms exacts des columns
 
-                if dropped_cols is not None:
-                    df.drop(columns=dropped_cols, inplace=True)
+                if no_drop_cols and self.dropped_cols is not None:
+                    df.drop(columns=self.dropped_cols, inplace=True)
 
             except FileNotFoundError:
-                print(f"\"{data_path}\" not found !")
+                print(f"\"{path}\" not found !")
 
             except AssertionError:
-                print(f"An error occurred during the loading of \"{data_path}\" !")
+                print(f"An error occurred during the loading of \"{path}\" !")
 
-        self.df = df
+        return df
 
-    def binarize_target(self, old_target, new_target, bin_threshold: int = 0) :
-        self.df[new_target] = (self.df[old_target] > bin_threshold).astype(int)
-        self.df.drop(columns=[old_target], inplace=True)
+    def _binarize_target(self, df) :
+        df_ = df
+
+        if self.bin_info is not None:
+            old_target = self.bin_info["old_target"]
+            new_target = self.bin_info["new_target"]
+            bin_threshold = self.bin_info["bin_threshold"]
+
+            df_[new_target] = (df_[old_target] > bin_threshold).astype(int)
+            df_.drop(columns=[old_target], inplace=True)
+
+        return df_
 
     def get_dataframe(self):
-        return self.df
+        return self.data_df
 
-    def _split_data(self, target: str):
-        df = self.df.copy()
+    def _get_Xy(self, df, target: str | None = None):
+        if df is None:
+            raise RuntimeError("A DataFrame is required.")
+
+        if target is None:
+            raise ValueError("A target must be specified.")
 
         y = df[target]
         X = df.drop(columns=[target])
 
-        return split_set(X, y, train_size=self.train_size)
+        return X, y
 
-    def apply_preprocessing(
+    def build_preprocessing(
             self,
             target: str | None = None,
             use_scaling: bool = False,
@@ -80,8 +142,6 @@ class Dataset_ :
             raise ValueError("A target must be specified.")
 
         self.preprocessor = ProjectPreprocessor(target=target)
-        self.X_train, self.X_test, self.y_train, self.y_test = self._split_data(target=target)
-
         self.preprocess = self.preprocessor.build_preprocess(
             use_scaling,
             cat_encoding,
@@ -91,36 +151,58 @@ class Dataset_ :
     def get_preprocess(self) :
         return self.preprocess
 
-    def get_optim_set(self, search_set_size: float = 0.3):
-        X_search, _, y_search, _ = split_set(self.X_train, self.y_train, train_size=search_set_size)
-        return X_search, y_search
+    def get_optim_set(self, target: str | None = None, search_set_size: float = 0.3):
+        if self.train_df is None:
+            self.train_df = self._load_csv(self.train_path)
 
-    def get_train_set(self):
-        return self.X_train, self.y_train
+        search_df, _ = split_df(self.train_df, train_size=search_set_size, target=target)
 
-    def get_raw_train_set(self, target: str | None = None):
-        if target is not None:
-            X_train, y_train, _, _ = self._split_data(target=target)
-            return X_train, y_train
-        else:
-            raise ValueError("You must specify a target to train on!")
+        return self._get_Xy(search_df, target=target)
 
-    def get_test_set(self):
-        return self.X_test, self.y_test
+    def get_train_set(self, target: str | None = None):
+        if self.train_df is None:
+            self.train_df = self._load_csv(self.train_path)
 
-    def get_raw_test_set(self, target: str | None = None):
-        if target is not None:
-            _, _, X_test, y_test = self._split_data(target=target)
-            return X_test, y_test
-        else:
-            raise ValueError("You must specify a target to test on!")
+        return self._get_Xy(self.train_df, target=target)
 
-    def to_npz(self, path : str | None = None) :
-        if path is not None :
-            X = self.X_test.to_numpy(dtype=np.float32)
-            y = np.asarray(self.y_test, dtype=np.int64)
+    def get_calib_set(self, target: str | None = None):
+        if self.calib_df is None:
+            self.calib_df = self._load_csv(self.calib_path)
+
+        return self._get_Xy(self.calib_df, target=target)
+
+    def get_test_set(self, target: str | None = None):
+        if self.test_df is None:
+            self.test_df = self._load_csv(self.test_path)
+
+        return self._get_Xy(self.test_df, target=target)
+
+    def get_classes(self, target: str | None = None):
+        data_df = self._load_csv(self.data_path)
+        data_df = self._binarize_target(data_df)
+
+        _, y = self._get_Xy(data_df, target=target)
+
+        y = to_numpy(y).ravel()
+        return np.unique(y)
+
+    def to_npz(self, path : str | None = None, target: str | None = None) :
+        if path is not None:
+            X, y = self.get_test_set(target)
+
+            X = X.to_numpy(dtype=np.float32)
+            X = np.ascontiguousarray(X) # IMPORTANT
+
+            y = np.asarray(y, dtype=np.int64)
+            y = np.ascontiguousarray(y)
+
+            # Contiguous check
+            print("Contiguous X : ", X.flags["C_CONTIGUOUS"])
+            print("Contiguous y : ", y.flags["C_CONTIGUOUS"])
 
             np.savez(f"{path}.npz", X=X, y=y)
+
+
 
 
 

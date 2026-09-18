@@ -53,17 +53,49 @@ class Base(ABC) :
 
         return Pipeline(steps)
 
+    def _calibrate(self, X, y,  calib_method: Literal["sigmoid"] = "sigmoid"):
+        if calib_method == "sigmoid":
+            scores = self.predict(X, return_probs=True)
+
+            self.calibrator_ = SigmoidCalibration()
+            self.calibrator_.fit(scores, y)
+
     @abstractmethod
     def optimize(self, X, y, metric: Literal["acc", "precision", "recall", "f1-score", "auc", "pr_auc"] = "acc", **kwargs) :
         pass
 
     @abstractmethod
-    def cross_validate(self, X, y, metric: Literal["acc", "precision", "recall", "f1-score", "auc", "pr_auc"] = "acc", n_splits: int = 5, **kwargs) :
+    def fit(self,
+            X, y,
+            metric: Literal["acc", "precision", "recall", "f1-score", "auc", "pr_auc"] = "acc",
+            calibrate: bool = False,
+            calib_set: tuple | list | None = None,
+            decision_threshold: float = 0.5,
+            **kwargs):
+
         pass
 
-    def _cross_validate(self, raw_model, X, y, metric: str, n_splits: int = 5) :
-        score_fn, metric_name = metric_config(metric)
+    @abstractmethod
+    def cross_validate(self,
+                       X, y,
+                       metric: Literal["acc", "precision", "recall", "f1-score", "auc", "pr_auc"] = "acc",
+                       n_splits: int = 5,
+                       calibrate: bool = False,
+                       calib_set: tuple | list | None = None,
+                       **kwargs) :
+        pass
 
+    def _cross_validate(self, 
+                        raw_model, 
+                        X, y, 
+                        metric: str, 
+                        n_splits: int = 5, 
+                        calibrate: bool = False, 
+                        calib_set: tuple | list | None = None,  
+                        **kwargs) :
+        
+        score_fn, metric_name = metric_config(metric)
+        
         if not self.params :
             X_search, _, y_search, _ = split_set(X, y, train_size=0.3)
             self.optimize(X_search, y_search)
@@ -83,6 +115,12 @@ class Base(ABC) :
 
             model.fit(X.iloc[train_idx], y.iloc[train_idx])
 
+            if calibrate:
+                if calib_set is not None:
+                    X_calib, y_calib = calib_set
+                    calib_method = kwargs.get("calib_method", "sigmoid")
+                    self._calibrate(X_calib, y_calib, calib_method=calib_method)
+
             if metric == "auc" or metric == "pr_auc":
                 preds = model.predict_proba(X.iloc[valid_idx])[:, 1]
             else:
@@ -95,16 +133,6 @@ class Base(ABC) :
         std = float(np.std(scores))
 
         print(f"\nCross validation results : \n\tMean ({metric_name}) : {mean:.4f} \n\tStd ({metric_name}) : {std:.4f}")
-
-    @abstractmethod
-    def fit(self,
-            X, y,
-            metric: Literal["acc", "precision", "recall", "f1-score", "auc", "pr_auc"] = "acc",
-            calibrate: bool = False,
-            decision_threshold: float = 0.5,
-            **kwargs):
-
-        pass
 
     def _get_scores(self, X):
         if hasattr(self.model_, "decision_function"):
@@ -235,11 +263,11 @@ class Base(ABC) :
             results["Brier-Score"] = brier_score(y, y_prob)
             results["ECE"] = ECE(y, y_prob)
 
-            print(f"\nBrier-Score : {results["Brier-Score"]:.4f}, ECE : {results["ECE"]:.4f}")
+            print(f"\nNLL : {results["NLL"]:.4f}, Brier-Score : {results["Brier-Score"]:.4f}, ECE : {results["ECE"]:.4f}")
 
         if conf_matrix:
             self._display_conf_matrix(
-                y_true=y, y_pred=y_prob,
+                y_true=y, y_pred=y_pred,
                 save_root=save_root
             )
 
@@ -253,13 +281,6 @@ class Base(ABC) :
                     json.dump(cr, file, indent=4)
 
         return results
-
-    def _calibrate(self, X, y,  calib_method: Literal["sigmoid"] = "sigmoid"):
-        if calib_method == "sigmoid":
-            scores = self.predict(X, return_probs=True)
-
-            self.calibrator_ = SigmoidCalibration()
-            self.calibrator_.fit(scores, y)
 
     def check_high_confidence_bias(self, X, y, threshold= 0.9) -> tuple :
         if self.preprocess_ is not None:

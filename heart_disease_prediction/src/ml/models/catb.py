@@ -16,7 +16,14 @@ class CatBoost(Base) :
                  params: dict | None = None,
                  preprocess = None):
 
+        if params is not None:
+            self.cat_features = params.get("cat_features", None)
+            params = {k: v for k, v in params.items() if k != "cat_features"}
+        else:
+            self.cat_features = None
+
         super().__init__(mode, params, preprocess)
+
 
     def optimize(self,
                  X,
@@ -65,7 +72,7 @@ class CatBoost(Base) :
                     verbose=False,
                     random_state=42,
                     save_snapshot=False,
-                    cat_features=["sex", "cp", "fbs", "restecg", "exang", "slope", "ca", "thal"],
+                    cat_features=self.cat_features,
                     **params
                 )
 
@@ -109,10 +116,18 @@ class CatBoost(Base) :
                        X, y,
                        metric: Literal["acc", "precision", "recall", "f1-score", "auc", "pr_auc"] = "acc",
                        n_splits: int = 5,
+                       calibrate: bool = False,
+                       calib_set: tuple | list | None = None,
                        **kwargs) :
 
         n_jobs = get_cpu_available()
         score_fn, metric_name = metric_config(metric)
+
+        if calibrate:
+            X_train, X_calib, y_train, y_calib = split_set(X, y, train_size=0.9)
+        else:
+            X_train = X
+            y_train = y
 
         if metric == "auc" :
             eval_metric = "AUC"
@@ -131,13 +146,13 @@ class CatBoost(Base) :
 
         scores = []
 
-        for train_idx, valid_idx in cv.split(X, y):
-            X_train, X_valid = X.iloc[train_idx], X.iloc[valid_idx]
-            y_train, y_valid = y.iloc[train_idx], y.iloc[valid_idx]
+        for train_idx, valid_idx in cv.split(X_train, y_train):
+            X_cv, X_valid = X_train.iloc[train_idx], X_train.iloc[valid_idx]
+            y_cv, y_valid = y_train.iloc[train_idx], y_train.iloc[valid_idx]
 
             preprocess = clone(self.preprocess)
 
-            X_train_t = preprocess.fit_transform(X_train, y_train)
+            X_cv_t = preprocess.fit_transform(X_cv, y_cv)
             X_valid_t = preprocess.transform(X_valid)
 
             model = CatBoostClassifier(
@@ -147,11 +162,18 @@ class CatBoost(Base) :
                 verbose=False,
                 random_state=42,
                 save_snapshot=False,
-                cat_features=["sex", "cp", "fbs", "restecg", "exang", "slope", "ca", "thal"],
+                cat_features=self.cat_features,
                 **self.params
             )
 
-            model.fit(X_train_t, y_train, eval_set=(X_valid_t, y_valid), verbose=False)
+            model.fit(X_cv_t, y_cv, eval_set=(X_valid_t, y_valid), verbose=False)
+
+            if calibrate:
+                if calib_set is not None:
+                    X_calib, y_calib = calib_set
+                    calib_method = kwargs.get("calib_method", "sigmoid")
+
+                    self._calibrate(X_calib, y_calib, calib_method=calib_method)
 
             if metric == "auc" or metric == "pr_auc":
                 y_pred = model.predict_proba(X_valid_t)[:, 1]
@@ -167,6 +189,7 @@ class CatBoost(Base) :
             X, y,
             metric: Literal["acc", "precision", "recall", "f1-score", "auc", "pr_auc"] = "acc",
             calibrate: bool = False,
+            calib_set: tuple | list | None = None,
             decision_threshold: float = 0.5,
             get_features_importance: bool = False,
             **kwargs) :
@@ -176,12 +199,6 @@ class CatBoost(Base) :
         if not self.params :
             X_search, _, y_search, _ = split_set(X, y, train_size=0.3)
             self.optimize(X_search, y_search, metric)
-
-        if calibrate:
-            X_train, X_calib, y_train, y_calib = split_set(X, y, train_size=0.9)
-        else:
-            X_train = X
-            y_train = y
 
         if metric == "acc" :
             eval_metric = "Accuracy"
@@ -201,7 +218,7 @@ class CatBoost(Base) :
                 verbose=False,
                 random_state=42,
                 save_snapshot=False,
-                cat_features=["sex", "cp", "fbs", "restecg", "exang", "slope", "ca", "thal"],
+                cat_features=self.cat_features,
                 **self.params
             )
         )
@@ -210,14 +227,17 @@ class CatBoost(Base) :
 
         start_time = time.time()
 
-        self.model_.fit(X_train, y_train)
+        self.model_.fit(X, y)
 
         # self.classes = self.model.named_steps["model"].classes_
         # self.n_features = len(self.model.named_steps["preprocess"].get_feature_names_out())
 
         if calibrate:
-            calib_method = kwargs.get("calib_method", "sigmoid")
-            self._calibrate(X_calib, y_calib, calib_method=calib_method)
+            if calib_set is not None:
+                X_calib, y_calib = calib_set
+                calib_method = kwargs.get("calib_method", "sigmoid")
+
+                self._calibrate(X_calib, y_calib, calib_method=calib_method)
 
         if metric == "auc" or metric == "pr_auc":
             y_pred = self.predict(X, return_probs=True, threshold=decision_threshold)

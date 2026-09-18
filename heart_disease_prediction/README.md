@@ -1,6 +1,6 @@
 # Project #2 : Heart Disease Prediction
 
-Check the live demo out **[here](https://heart-disease-prediction-project-demo.streamlit.app/)**.
+Check out the live demo **[here](https://heart-disease-prediction-project-demo.streamlit.app/)**.
 
 ## Models Evaluated
 * Logistic Regression

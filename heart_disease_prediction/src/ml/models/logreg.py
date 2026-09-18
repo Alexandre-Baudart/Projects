@@ -104,23 +104,20 @@ class LogisticReg(Base) :
                        X, y,
                        metric: Literal["acc", "precision", "recall", "f1-score", "auc", "pr_auc"] = "acc",
                        n_splits: int = 5,
+                       calibrate: bool = False,
+                       calib_set: tuple | list | None = None,
                        **kwargs):
 
-        self._cross_validate(LogisticRegression, X, y, metric, n_splits=n_splits)
+        self._cross_validate(LogisticRegression, X, y, metric, n_splits=n_splits, calibrate=calibrate, calib_set=calib_set, **kwargs)
 
     def fit(self,
             X, y,
             metric:Literal["acc", "precision", "recall", "f1-score", "auc", "pr_auc"] = "acc",
             calibrate: bool = False,
+            calib_set: tuple | list | None = None,
             decision_threshold: float = 0.5,
             get_features_importance: bool = False,
             **kwargs):
-
-        if calibrate:
-            X_train, X_calib, y_train, y_calib = split_set(X, y, train_size=0.9)
-        else:
-            X_train = X
-            y_train = y
 
         if not self.params:
             X_search, _, y_search, _ = split_set(X, y, train_size=0.3)
@@ -137,14 +134,17 @@ class LogisticReg(Base) :
 
         start_time = time.time()
 
-        self.model_.fit(X_train, y_train)
+        self.model_.fit(X, y)
 
         # self.classes = self.model.named_steps["model"].classes_
         # self.n_features = len(self.model.named_steps["preprocess"].get_feature_names_out())
 
         if calibrate:
-            calib_method = kwargs.get("calib_method", "sigmoid")
-            self._calibrate(X_calib, y_calib, calib_method=calib_method)
+            if calib_set is not None:
+                X_calib, y_calib = calib_set
+                calib_method = kwargs.get("calib_method", "sigmoid")
+
+                self._calibrate(X_calib, y_calib, calib_method=calib_method)
 
         if metric == "auc" or metric == "pr_auc":
             y_pred = self.predict(X, return_probs=True, threshold=decision_threshold)

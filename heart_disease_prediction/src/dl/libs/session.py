@@ -7,14 +7,15 @@ from typing import final, Literal
 from pathlib import Path
 from datetime import datetime
 
-from ..project_dataset import ProjectTrainDataset, ProjectTestDataset, load_preprocess_
+from ..project_dataset import ProjectTrainDataset, ProjectTestDataset
 
 from .nncore.nno import NNO
 from .nncore.nnp import NNP
-from .utils import criterion_config, optimizer_config, select_device
+from .utils import criterion_config, optimizer_config, select_device, random_init
 from .callbacks import callbacks_config
 
 from data.dataset import Dataset_
+from .calibration import CalibratedModel
 
 class DLSession:
     def __init__(self,
@@ -51,13 +52,14 @@ class DLSession:
         self.target = target
 
         preprocess_options = preprocess_options or {}
-        self.dataset.apply_preprocessing(target=self.target, **preprocess_options)
+        self.dataset.build_preprocessing(target=self.target, **preprocess_options)
 
         self.config = config
+        random_init(seed=self.config.get("random_seed", 42))
+
         self.raw_model = self.config["raw_model"]
 
         self.nnp = None
-        self.ckpt_stuff = None
 
         self.mode = self.config.get("mode", "clf_binary")
         self.device = select_device(type_=self.config.get("device_type", "cpu"))
@@ -179,7 +181,7 @@ class DLSession:
         if not self._check_model_path_exists(model_path):
             raise FileNotFoundError(f"No model at: {model_path}")
 
-        model_config = self.config.get("model_config", {})
+        model_config = self.config["train"]["params"]
         model_config["n_classes"] = dataset.get_n_classes()
         model_config["input_size"] = dataset.get_input_size()
 
@@ -191,7 +193,7 @@ class DLSession:
             criterion_info=self.config.get("criterion_info", {}),
         )
 
-        self.nnp, self.ckpt_stuff = NNP.load_model(
+        self.nnp = NNP.load_model(
             model=model,
             model_path=str(model_path),
             criterion=criterion,
@@ -204,8 +206,13 @@ class DLSession:
     def optimize(self):
         optim_info = self.config["optim_info"]
 
-        X, y = self.dataset.get_optim_set(search_set_size=optim_info.get("search_set_size", 0.3))
-        dataset_optim = ProjectTrainDataset(X, y, self.preprocess)
+        dataset_optim = ProjectTrainDataset(
+            dataset=self.dataset,
+            target=self.target,
+            preprocess_path=str(self.active_run),
+            task="optim",
+            use_stratified_split=optim_info.get("use_stratified_split", False)
+        )
 
         criterion = criterion_config(
             self.mode,
@@ -261,15 +268,20 @@ class DLSession:
             )
 
     @final
-    def train(self, calibrate: bool = True, save_model: bool = False, **kwargs):
+    def train(self, logits_scaling: bool = False, save_model: bool = False):
         train_info = self.config["train_info"]
 
-        X, y = self.dataset.get_train_set()
-        dataset_train = ProjectTrainDataset(X, y, self.preprocess,
-                                            use_stratified_split=train_info.get("use_stratified_split", False))
+        dataset_train = ProjectTrainDataset(
+                dataset=self.dataset,
+                target=self.target,
+                preprocess_path=str(self.active_run),
+                task="train",
+                use_stratified_split=train_info.get("use_stratified_split", False)
+        )
+
         self.preprocess_ = dataset_train.get_preprocess_()
 
-        optimizer_info = self.config.get("optimizer_info", {})
+        optimizer_info = train_info.get("optimizer_info", {})
         optimizer_info["weight_decay"] = self.config["train"].get("weight_decay", 0.0)
 
         criterion = criterion_config(
@@ -280,6 +292,9 @@ class DLSession:
         model_config = self.config["train"]["params"]
         model_config["n_classes"] = dataset_train.get_n_classes()
         model_config["input_size"] = dataset_train.get_input_size()
+
+        if not logits_scaling:
+            model_config["scaling_info"] = None
 
         if self.config.get("get_transformer_stuff", False):
             n_num, n_cat, cat_idx, cat_cardinalities = dataset_train.get_tab_transformer_stuff()
@@ -300,15 +315,21 @@ class DLSession:
         model = self.raw_model(model_config)
         model.to(self.device)
 
-        optimizer = optimizer_config(
-            model_or_params=model,
-            optimizer_info=optimizer_info
-        )
+        if self.nnp is None or (self.nnp is not None and not self.nnp.has_optimizer()):
+            optimizer = optimizer_config(
+                model_or_params=model,
+                optimizer_info=optimizer_info
+            )
+
+            scheduler_info = train_info.get("scheduler_info", None)
+        else:
+            optimizer = self.nnp.optimizer
+            scheduler_info = self.nnp.callbacks["scheduler"]
 
         callbacks = callbacks_config(
             optimizer=optimizer,
-            scheduler_info=train_info.get("scheduler_info", {}),
-            **train_info.get("callbacks_info", {})
+            scheduler_info=scheduler_info,
+            **self.config.get("callbacks_info", {})
         )
 
         self.nnp = NNP(
@@ -318,7 +339,7 @@ class DLSession:
             precision=train_info.get("precision", 32),
             memory_format=train_info.get("memory_format", None),
             criterion=criterion,
-            metric_info=self.config.get("metric_info", {}),
+            metric_info=train_info.get("metric_info", {}),
             dataloader_params=self.config.get("dataloader_params", {}),
             device=self.device
         )
@@ -349,6 +370,10 @@ class DLSession:
                 print("\nNote: preprocess_ saved with success!")
 
             self.run_metadata["status"] = "trained"
+
+            if logits_scaling:
+                self.run_metadata["logits_scaling"] = model_config["scaling_info"]["method"]
+
             self._save_metadata(type_="run")
 
             self._save_run_json(
@@ -356,22 +381,126 @@ class DLSession:
                 results
             )
 
-    def test(self, model_path: str | None = None, conf_matrix: bool = False, calib_eval: bool = False):
-        X, y = self.dataset.get_test_set()
+    def calibrate(self, model_path: str | None = None, save_model: bool = False):
+        calib_info = self.config.get("calib_info", None)
 
+        if calib_info is not None:
+            if model_path is not None:
+                model_path = Path(model_path)
+                if self._check_model_path_exists(model_path):
+                    self.active_run = model_path.parent
+
+                    dataset_calib = ProjectTrainDataset(
+                        dataset=self.dataset,
+                        target=self.target,
+                        preprocess_path=str(self.active_run),
+                        task="calib",
+                        use_stratified_split=calib_info.get("use_stratified_split", False)
+                    )
+
+                    self.load(model_path, dataset_calib)
+                else:
+                    raise FileNotFoundError(f"No model at: {model_path}")
+            else:
+                dataset_calib = ProjectTrainDataset(
+                    dataset=self.dataset,
+                    target=self.target,
+                    preprocess_path=str(self.active_run),
+                    task="calib",
+                    use_stratified_split=calib_info.get("use_stratified_split", False)
+                )
+
+            calib_info["n_classes"] = dataset_calib.get_n_classes()
+
+            if save_model and self.active_run is None:
+                self.new_run()
+
+            train_info = self.config["train_info"]
+
+            optimizer_info = calib_info.get("optimizer_info", {})
+            optimizer_info["weight_decay"] = calib_info.get("weight_decay", 0.0)
+
+            criterion = criterion_config(
+                self.mode,
+                criterion_info=self.config.get("criterion_info", {}),
+            )
+
+            calibrated_model = CalibratedModel(trained_model=self.nnp.model, config=calib_info)
+
+            optimizer = optimizer_config(
+                model_or_params=calibrated_model,
+                optimizer_info=optimizer_info
+            )
+
+            callbacks = callbacks_config(
+                optimizer=optimizer,
+                scheduler_info=calib_info.get("scheduler_info", None),
+                **self.config.get("callbacks_info", {})
+            )
+
+            self.nnp = NNP(
+                model=calibrated_model,
+                mode=self.mode,
+                batch_size=self.config.get("batch_size", 32),
+                precision=train_info.get("precision", 32),
+                memory_format=train_info.get("memory_format", None),
+                criterion=criterion,
+                metric_info=calib_info.get("metric_info", {}),
+                dataloader_params=self.config.get("dataloader_params", {}),
+                device=self.device
+            )
+
+            results = self.nnp.train(
+                dataset=dataset_calib,
+                n_epochs=train_info.get("n_epochs", 30),
+                lr=self.config.get("lr", 1e-3),
+                optimizer=optimizer,
+                clip_grad_norm=train_info.get("clip_grad_norm", False),
+                batch_proc_fn=train_info.get("batch_proc_fn", None),
+                use_ema=train_info.get("use_ema", False),
+                ema_decay=train_info.get("ema_decay", 0.999),
+                accumulate_grad_batches=train_info.get("accumulate_grad_batches", 1),
+                unfreezing_schedule=train_info.get("unfreezing_schedule", None),
+                callbacks=callbacks,
+                save_root=str(self.active_run),
+                save_best_model=save_model,
+                enable_checkpoints=train_info.get("enable_checkpoints", False)
+            )
+
+            if save_model:
+                if self.preprocess_ is not None:
+                    joblib.dump(self.preprocess_, (self.active_run / "preprocess_.joblib"))
+                    print("\nNote: preprocess_ saved with success!")
+
+                self.run_metadata["status"] = "calibrated"
+                self.run_metadata["calibration"] = "sigmoid"
+
+                self._save_metadata(type_="run")
+
+    def test(self, model_path: str | None = None, conf_matrix: bool = False):
         if model_path is not None:
             model_path = Path(model_path)
             if self._check_model_path_exists(model_path):
                 self.active_run = model_path.parent
 
-                self.preprocess_ = load_preprocess_(str(self.active_run))
-                dataset_test = ProjectTestDataset(X, y, self.preprocess_)
+                dataset_test = ProjectTestDataset(
+                    dataset=self.dataset,
+                    target=self.target,
+                    preprocess_=self.preprocess_,
+                )
 
                 self.load(model_path, dataset_test)
             else:
                 raise FileNotFoundError(f"No model at: {model_path}")
         else:
-            dataset_test = ProjectTestDataset(X, y, self.preprocess_)
+            dataset_test = ProjectTestDataset(
+                dataset=self.dataset,
+                target=self.target,
+                preprocess_=self.preprocess_,
+            )
+
+        if self.preprocess_ is None:
+            dataset_test.load_preprocess_(path=str(self.active_run))
 
         if self.config.get("get_transformer_stuff", False):
             n_num, n_cat, cat_idx, cat_cardinalities = dataset_test.get_tab_transformer_stuff()
@@ -388,7 +517,7 @@ class DLSession:
         results = self.nnp.evaluate(
             dataset=dataset_test,
             metrics=metrics,
-            calib_eval=calib_eval,
+            calib_eval=self.config["test_info"].get("calib_eval", False),
             conf_matrix=conf_matrix,
             save_root=eval_path
         )
@@ -401,21 +530,29 @@ class DLSession:
 
     @final
     def check_high_confidence_bias(self, model_path: str | None = None):
-        X, y = self.dataset.get_test_set()
-
         if model_path is not None:
-            model_path = Path(model_path)
+            model_path = self.root / model_path
             if self._check_model_path_exists(model_path):
                 self.active_run = model_path.parent
 
-                self.preprocess_ = load_preprocess_(str(self.active_run))
-                dataset_check = ProjectTestDataset(X, y, self.preprocess_)
+                dataset_check = ProjectTestDataset(
+                    dataset=self.dataset,
+                    target=self.target,
+                    preprocess_=self.preprocess_,
+                )
 
                 self.load(model_path, dataset_check)
             else:
                 raise FileNotFoundError(f"No model at: {model_path}")
         else:
-            dataset_check = ProjectTestDataset(X, y, self.preprocess_)
+            dataset_check = ProjectTestDataset(
+                dataset=self.dataset,
+                target=self.target,
+                preprocess_=self.preprocess_,
+            )
+
+        if self.preprocess_ is None:
+            dataset_check.load_preprocess_(path=str(self.active_run))
 
         if self.config.get("get_transformer_stuff", False):
             n_num, n_cat, cat_idx, cat_cardinalities = dataset_check.get_tab_transformer_stuff()
@@ -431,21 +568,29 @@ class DLSession:
 
     @final
     def benchmark(self, model_path: str | None = None, n_iterations: int = 100):
-        X, y = self.dataset.get_test_set()
-
         if model_path is not None:
             model_path = Path(model_path)
             if self._check_model_path_exists(model_path):
                 self.active_run = model_path.parent
 
-                self.preprocess_ = load_preprocess_(str(self.active_run))
-                dataset_benchmark = ProjectTestDataset(X, y, self.preprocess_)
+                dataset_benchmark = ProjectTestDataset(
+                    dataset=self.dataset,
+                    target=self.target,
+                    preprocess_=self.preprocess_,
+                )
 
                 self.load(model_path, dataset_benchmark)
             else:
                 raise FileNotFoundError(f"No model at: {model_path}")
         else:
-            dataset_benchmark = ProjectTestDataset(X, y, self.preprocess_)
+            dataset_benchmark = ProjectTestDataset(
+                dataset=self.dataset,
+                target=self.target,
+                preprocess_=self.preprocess_,
+            )
+
+        if self.preprocess_ is None:
+            dataset_benchmark.load_preprocess_(path=str(self.active_run))
 
         if self.config.get("get_transformer_stuff", False):
             n_num, n_cat, cat_idx, cat_cardinalities = dataset_benchmark.get_tab_transformer_stuff()
@@ -464,14 +609,7 @@ class DLOrchestrator:
         self.session_args = session_args
         self.sess_models = self.session_args["model_config"].keys()
 
-        self.ACTION_ORDER = ["optimize", "train", "test", "check_high_confidence_bias", "benchmark"]
-        self.ACTION_DEPENDENCIES = {
-            "test": ["train"],
-            "check_high_confidence_bias": ["train"],
-            "benchmark": ["train"],
-            "optimize": [],
-            "train": []
-        }
+        self.ACTION_ORDER = ["optimize", "train", "calibrate", "test", "check_high_confidence_bias", "benchmark"]
 
         self.args = None
         self._from_cli()
@@ -483,6 +621,9 @@ class DLOrchestrator:
             self.model_path = os.path.join(self.args.root, self.args.load)
         else:
             self.model_path = None
+
+        actions = self.args.actions
+        if self.args.calibrate: actions.append("calibrate")
 
         self.actions = []
         self._resolve_actions(self.args.actions)
@@ -501,10 +642,13 @@ class DLOrchestrator:
             help="Action"
         )
         parser.add_argument(
+            "--logits_scaling", "-lsc", default=False, action="store_true", help="Scale logits"
+        )
+        parser.add_argument(
             "--calibrate", "-c", default=False, action="store_true", help="Calibrate model"
         )
         parser.add_argument(
-            "--save", "-s", default=False, action="store_true", help="Save activation"
+            "--save", "-s", default=False, action="store_true", help="Save model"
         )
         parser.add_argument(
             "--root", "-r", default="runs/sandbox", help="Root"
@@ -557,7 +701,7 @@ class DLOrchestrator:
                 return
 
             if (
-                    action_ in ["test", "check_high_confidence_bias", "benchmark"]
+                    action_ in ["calibrate", "test", "check_high_confidence_bias", "benchmark"]
                     and "train" not in actions
                     and not self.model_path
             ):
@@ -583,15 +727,20 @@ class DLOrchestrator:
 
             elif action == "train":
                 self.session.train(
-                    calibrate=self.args.calibrate,
+                    logits_scaling=self.args.logits_scaling,
+                    save_model=self.args.save
+                )
+
+            elif action == "calibrate":
+                self.session.calibrate(
+                    model_path=self.args.load,
                     save_model=self.args.save
                 )
 
             elif action == "test":
                 self.session.test(
                     model_path=self.args.load,
-                    conf_matrix=self.args.conf_matrix,
-                    calib_eval=self.args.calibrate
+                    conf_matrix=self.args.conf_matrix
                 )
 
             elif action == "check_high_confidence_bias":

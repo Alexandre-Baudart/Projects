@@ -205,7 +205,7 @@ class NNO :
         model_ref = ray.put(self.model)
         data_ref = ray.put(self.dataset_train)
 
-        print("\n=== Optimization ===\n")
+        print(f"\n=== Optimization: {self.model.__class__.__name__}  ===\n")
 
         analysis = tune.run(
             train_,
@@ -237,21 +237,21 @@ class NNO :
         best_config = analysis.get_best_config(metric=self.metric, mode=self.optim_mode)["search_space"]
 
         if best_config is not None:
+            self.model = build_model(self.model, best_config)
+
             best_config = {k: v for k, v in best_config.items()
                            if k not in ["n_classes", "input_size", "n_num", "n_cat", "cat_idx", "cat_cardinalities"]}
 
             print(f"\nBest config :", best_config)
 
-        self.model = build_model(self.model, best_config)
-
-        if self.save_best_model :
-            torch.save(
-                {
-                    "model_state_dict": self.model.state_dict(),
-                    "config": best_config
-                },
-                "best_model.pt"
-            )
+            if self.save_best_model :
+                torch.save(
+                    {
+                        "model_state_dict": self.model.state_dict(),
+                        "config": best_config
+                    },
+                    "best_model.pt"
+                )
 
         return best_config
 

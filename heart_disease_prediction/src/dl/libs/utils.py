@@ -10,14 +10,14 @@ import lion_pytorch as lion
 import torch.nn as nn
 import torch_directml
 
-from sklearn.calibration import calibration_curve
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import log_loss
 
 from torch.utils.data import TensorDataset, DataLoader, WeightedRandomSampler
 from torchvision import datasets
 from torchvision.transforms import ToTensor
 
-from torchmetrics import Accuracy, AUROC, MeanSquaredError, MeanAbsoluteError, R2Score, AveragePrecision, Recall, Precision, F1Score
+from torchmetrics import Accuracy, AUROC, MeanSquaredError, MeanAbsoluteError, R2Score, AveragePrecision, Recall, Precision, F1Score, Metric
 
 def random_init(seed:int = 42, device = torch.device("cpu")) :
     torch.manual_seed(seed)
@@ -307,44 +307,85 @@ def apply_tta(model, inputs) :
     # moyenne logits
     return torch.stack(outputs).mean(dim=0)
 
+class BrierScore(Metric):
+    def __init__(self, task: str = "binary", **kwargs):
+        super().__init__(**kwargs)
 
-def brier_score(y_true: torch.Tensor, y_prob: torch.Tensor, mode = "clf_binary") :
-    from sklearn.preprocessing import label_binarize
+        self.task = task
 
-    if mode != "clf_binary" :
-        n_classes = y_prob.shape[1]
-        y_onehot = label_binarize(y_true, classes=np.arange(n_classes))
+        self.add_state(
+            "sum_squared_error",
+            default=torch.tensor(0.0),
+            dist_reduce_fx="sum"
+        )
 
-        return torch.mean(torch.sum((y_prob - y_onehot) ** 2))
-    else :
-        return torch.mean((y_prob - y_true) ** 2)
+        self.add_state(
+            "total",
+            default=torch.tensor(0),
+            dist_reduce_fx="sum"
+        )
 
-def ECE(y_true, y_prob, n_bins: int = 10) :
-    # Obtenir les probas moyennes par bin et les fréquences réelles
-    prob_true, prob_pred = calibration_curve(y_true, y_prob, n_bins=n_bins, strategy="uniform")
+    def update(self, y_pred, y_true):
+        y_pred = y_pred.float()
+        y_true = y_true.float()
 
-    # Retrouver la distribution des effectifs par bin
-    bin_edges = np.linspace(0, 1, n_bins + 1)
-    bin_assignments = np.digitize(y_prob, bin_edges) - 1
+        if self.task == "binary":
+            y_pred = y_pred.squeeze(-1)
+            y_true = y_true.squeeze(-1)
 
-    ece = 0.0
-    n_samples = len(y_true)
+            error = (y_pred - y_true) ** 2
 
-    # Calcul de la somme pondérée des écarts abs(vrai - prédit)
-    for i in range(n_bins) :
-        # Sélection des éléments appartenant au bin i
-        bin_mask = (bin_assignments == i)
-        bin_size = np.sum(bin_mask)
+        else:
+            error = (y_pred - y_true) ** 2
 
-        if bin_size > 0 :
-            # Calculer la moyenne locale pour bin spécifique
-            local_prob_true = np.mean(prob_true[bin_mask])
-            local_prob_pred = np.mean(prob_pred[bin_mask])
+        self.sum_squared_error += error.sum()
+        self.total += error.numel()
 
-            # Formule de l'ECE : (taille_bin / total) * |vrai - prédit|
-            ece += (bin_size / n_samples) * np.abs(local_prob_pred - local_prob_true)
+    def compute(self):
+        return self.sum_squared_error / self.total
 
-    return ece
+class ECE:
+    def __init__(self, task: str = "binary", n_bins: int = 10, **kwargs):
+        self.task = task
+        self.n_bins = n_bins
+
+    def __call__(self, y_prob, y_true):
+        # Convertir en tenseurs de type float32 (obligé pour mean() notamment)
+        y_true = torch.as_tensor(y_true, dtype=torch.float32)
+        y_prob = torch.as_tensor(y_prob, dtype=torch.float32)
+
+        # Retrouver la distribution des effectifs par bin
+        bin_edges = torch.linspace(0, 1, self.n_bins + 1, device=y_prob.device)
+        bin_assignments = torch.bucketize(y_prob, bin_edges)
+
+        # bin_assignments reste entre 0 et n_bins - 1
+        bin_assignments = torch.clamp(bin_assignments, 0, self.n_bins - 1)
+
+        ece = torch.tensor(0.0)
+        n_samples = len(y_true)
+
+        # Calcul de la somme pondérée des écarts abs(vrai - prédit)
+        for i in range(self.n_bins):
+            # Sélection des éléments appartenant au bin i
+            bin_mask = (bin_assignments == i)
+            bin_size = torch.sum(bin_mask)  # item() -> renvoie l'élément hors du tenseur (ici: un int)
+
+            if bin_size > 0:
+                # Calculer la moyenne locale pour bin spécifique
+                local_prob_true = torch.mean(y_true[bin_mask])
+                local_prob_pred = torch.mean(y_prob[bin_mask])
+
+                # Formule de l'ECE : (taille_bin / total) * |vrai - prédit|
+                ece += (bin_size / n_samples) * torch.abs(local_prob_pred - local_prob_true)
+
+        return ece.item()
+
+class NLL:
+    def __init__(self, task: str = "binary", **kwargs):
+        self.task = task
+
+    def __call__(self, y_prob, y_true):
+        return log_loss(y_true, y_prob)
 
 def metric_config(mode: str = "clf_binary", metric_info: dict | None = None) :
     CLF_METRICS = {
@@ -353,7 +394,10 @@ def metric_config(mode: str = "clf_binary", metric_info: dict | None = None) :
         "pr_auc": {"metric": AveragePrecision, "name": "PR-AUC"},
         "recall": {"metric": Recall, "name": "Recall"},
         "precision": {"metric": Precision, "name": "Precision"},
-        "f1-score": {"metric": F1Score, "name": "F1-Score"},
+        "f1_score": {"metric": F1Score, "name": "F1-Score"},
+        "brier_score": {"metric": BrierScore, "name": "Brier-Score"},
+        "ece": {"metric": ECE, "name": "ECE"},
+        "nll": {"metric": NLL, "name": "NLL"},
     }
     REG_METRICS = {
         "mae": {"metric": MeanAbsoluteError, "name": "MAE"},
