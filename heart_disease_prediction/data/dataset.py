@@ -116,8 +116,13 @@ class Dataset_ :
 
         return df_
 
-    def get_dataframe(self):
-        return self.data_df
+    def get_original_df(self, binarize: bool = False):
+        df = self._load_csv(self.data_path)
+
+        if binarize:
+            df = self._binarize_target(df)
+
+        return df
 
     def _get_Xy(self, df, target: str | None = None):
         if df is None:

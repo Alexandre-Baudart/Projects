@@ -68,7 +68,7 @@ def heatmap_correlation(df, dropped_cols: list | None = None) :
     plt.figure(figsize=(12,8))
     corr = df.corr(numeric_only=True).round(2)
 
-    sns.heatmap(corr, annot=True, cmap="coolwarm")
+    sns.heatmap(corr, annot=True, cmap="inferno")
 
     plt.tight_layout()
     plt.show()

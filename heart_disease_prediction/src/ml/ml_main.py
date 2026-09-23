@@ -68,9 +68,7 @@ model_config = {
         "params": {
             "kernel": "rbf",
             'C': 4.19,
-            "sigma": 3.9,
-            "degree": 4,
-            "coef0": 0
+            "sigma": 3.9
         },
 
         "preprocess": {

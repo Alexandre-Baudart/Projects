@@ -128,7 +128,14 @@ class LogisticReg(Base) :
             "tol": self.params.get("tol", 1e-3),
         }
 
-        self.model_ = self._build_pipeline(model=LogisticRegression(max_iter=1000, fit_intercept=True, verbose=0, random_state=42, **logreg_params))
+        self.model_ = self._build_pipeline(
+            model=LogisticRegression(
+                max_iter=1000,
+                fit_intercept=True,
+                verbose=0,
+                random_state=42,
+                **logreg_params)
+        )
 
         print("\n=== Training ===")
 
