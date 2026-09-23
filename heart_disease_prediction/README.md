@@ -2,8 +2,9 @@
 
 ## Description
 
-This project is about the evaluation and comparison of different machine learning models to predict whether a patient has features indicating a potential coronary disease
-or not. Features importance and calibration impact were also analyzed.
+This project evaluates and compares various machine learning models to predict the presence of 
+coronary artery disease in patients. 
+Feature importance and the impact of model calibration were also analyzed.
 
 Check out the live demo **[here](https://heart-disease-prediction-project-demo.streamlit.app/)**.
 
