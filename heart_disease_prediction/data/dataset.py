@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+from pandas import DataFrame
 import numpy as np
 from typing import Literal
 
@@ -13,10 +14,10 @@ def to_numpy(data, dtype=np.float32):
 
     return np.asarray(data, dtype=dtype)
 
-def split_df(df, train_size: float = 0.8, target: str | None = None) :
+def split_df(df: DataFrame, train_size: float = 0.8, target: str | None = None) :
     return train_test_split(df, train_size=train_size, random_state=42, stratify=df[target])
 
-def split_set(X, y, train_size: float = 0.80) :
+def split_set(X: DataFrame, y, train_size: float = 0.80) :
     return train_test_split(X, y, train_size=train_size, random_state=42, stratify=y)
 
 class Dataset_ :
@@ -124,7 +125,8 @@ class Dataset_ :
 
         return df
 
-    def _get_Xy(self, df, target: str | None = None):
+    @staticmethod
+    def _get_Xy(df: DataFrame, target: str | None = None):
         if df is None:
             raise RuntimeError("A DataFrame is required.")
 

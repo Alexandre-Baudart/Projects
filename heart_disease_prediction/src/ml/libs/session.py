@@ -407,10 +407,13 @@ class MLOrchestrator:
             "--conf_matrix", "-cm", default=False, action="store_true", help="Confusion matrix"
         )
         parser.add_argument(
+            "--get_features_importance", "-gfi", default=False, action="store_true", help="Get features importance"
+        )
+        parser.add_argument(
             "--clean_sandbox", "-cs", default=False, action="store_true", help="Clean sandbox"
         )
         parser.add_argument(
-            "--get_features_importance", "-gfi", default=False, action="store_true", help="Get features importance"
+            "--HELP", "-H", default=False, action="store_true", help="Show help"
         )
 
         # args = dict(vars(parser.parse_args()))
@@ -462,6 +465,10 @@ class MLOrchestrator:
         if self.args.clean_sandbox:
             self.session.clean_sandbox()
 
+        if self.args.HELP:
+            self.help()
+            return
+
         for action in self.actions:
             if action == "load":
                 self.session.load(model_path=self.model_path)
@@ -487,3 +494,68 @@ class MLOrchestrator:
 
             elif action == "benchmark":
                 self.session.benchmark()
+
+    @staticmethod
+    def help():
+        print("""
+ML Session Helper
+
+==================
+
+Usage:
+    python -m src.ml.ml_main [OPTIONS]
+    
+Available models:
+    logreg -- Logistic Regression
+    svm -- SVM
+    random_forest -- Random Forest
+    xgb -- XGBoost
+    catb -- CatBoost
+    
+Available actions:
+    optimize
+    train
+    cross-validate
+    test -- requires train
+    check_high_confidence_bias -- requires train
+    benchmark -- requires train
+    
+Available formats:
+    joblib
+    skops
+        
+Options:
+    -m, --model <model>:
+        to select a model for the session
+    
+    -a, --actions <actions>:
+        to resolve the provided actions
+    
+    -c, --calibrate:
+        to calibrate the model
+    
+    -s, --save:
+        to save the session results (metadata, train, test,...) 
+        and the model 
+    
+    -r, --root <new_root>:
+        to specify a new root for backup (default: runs/sandbox)
+    
+    -sn, --save_name <save_name>:
+        to specify a save filename (optional)
+        
+    -sf, --save_format <save_format>:
+        to specify a save format for model (default: joblib)
+        
+    -l, --load <model_path>:
+        to load the specified model
+    
+    -cm, --conf_matrix:
+        to enable the building of confusion matrix
+    
+    -gfi, --get_features_importance:
+        to recover features importance
+    
+    -cs, --clean_sandbox:
+        to clean sandbox
+    """)

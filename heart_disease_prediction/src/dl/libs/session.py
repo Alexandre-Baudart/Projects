@@ -657,7 +657,7 @@ class DLOrchestrator:
             "--save_name", "-sn", default=None, help="Save filename"
         )
         parser.add_argument(
-            "--save_format", "-sf", default="joblib", help="Save format"
+            "--save_format", "-sf", default="pt", help="Save format"
         )
         parser.add_argument(
             "--load", "-l", default=None, help="Load model"
@@ -666,10 +666,13 @@ class DLOrchestrator:
             "--conf_matrix", "-cm", default=False, action="store_true", help="Confusion matrix"
         )
         parser.add_argument(
+            "--device", "-d", choices=["cpu", "gpu"], default="cpu",
+        )
+        parser.add_argument(
             "--clean_sandbox", "-cs", default=False, action="store_true", help="Clean sandbox"
         )
         parser.add_argument(
-            "--device", "-d", choices=["cpu", "gpu"], default="cpu",
+            "--HELP", "-H", default=False, action="store_true", help="Show help"
         )
 
         self.args = parser.parse_args()
@@ -721,6 +724,10 @@ class DLOrchestrator:
         if self.args.clean_sandbox:
             self.session.clean_sandbox()
 
+        if self.args.HELP:
+            self.help()
+            return
+
         for action in self.actions:
             if action == "optimize":
                 self.session.optimize()
@@ -748,3 +755,68 @@ class DLOrchestrator:
 
             elif action == "benchmark":
                 self.session.benchmark(model_path=self.args.load)
+
+    @staticmethod
+    def help():
+        print("""
+DL Session Helper
+
+==================
+
+Usage:
+    python -m src.dl.dl_main [OPTIONS]
+
+Available models:
+    mlp -- MLP
+    tab-transformer-v1 -- Tab-Transformer (V1)
+    tab-transformer-v2 -- Tab-Transformer (V2)
+
+Available actions:
+    optimize
+    train
+    test -- requires train
+    check_high_confidence_bias -- requires train
+    benchmark -- requires train
+    
+Available devices:
+    cpu
+    gpu (if accessible)
+
+Options:
+    -m, --model <model>:
+        to select a model for the session
+        
+    -lsc, --logits_scaling:
+        to scale the logits
+
+    -a, --actions <actions>:
+        to resolve the provided actions
+
+    -c, --calibrate:
+        to calibrate the model
+
+    -s, --save:
+        to save the session results (metadata, train, test,...) 
+        and the model 
+
+    -r, --root <new_root>:
+        to specify a new root for backup (default: runs/sandbox)
+
+    -sn, --save_name <save_name>:
+        to specify a save filename (optional)
+
+    -sf, --save_format <save_format>:
+        to specify a save format for model (default: pt)
+        
+    -l, --load <model_path>:
+        to load the specified model
+
+    -cm, --conf_matrix:
+        to enable the building of confusion matrix
+
+    -d, --device:
+        to change the execution device (default: cpu)
+
+    -cs, --clean_sandbox:
+        to clean sandbox
+""")
