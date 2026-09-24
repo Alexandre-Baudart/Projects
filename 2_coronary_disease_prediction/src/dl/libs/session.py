@@ -1,6 +1,7 @@
 import joblib
 import os
 import shutil
+import subprocess
 import json
 import argparse
 from typing import final, Literal
@@ -645,34 +646,37 @@ class DLOrchestrator:
             "--logits_scaling", "-lsc", default=False, action="store_true", help="Scale logits"
         )
         parser.add_argument(
-            "--calibrate", "-c", default=False, action="store_true", help="Calibrate model"
+            "--calibrate", "-c", default=False, action="store_true", help="calibrate model"
         )
         parser.add_argument(
-            "--save", "-s", default=False, action="store_true", help="Save model"
+            "--save", "-s", default=False, action="store_true", help="enable backup"
         )
         parser.add_argument(
-            "--root", "-r", default="runs/sandbox", help="Root"
+            "--root", "-r", default="runs/sandbox", help="backup root"
         )
         parser.add_argument(
-            "--save_name", "-sn", default=None, help="Save filename"
+            "--save_name", "-sn", default=None, help="save filename"
         )
         parser.add_argument(
-            "--save_format", "-sf", default="pt", help="Save format"
+            "--save_format", "-sf", default="joblib", help="save format"
         )
         parser.add_argument(
-            "--load", "-l", default=None, help="Load model"
+            "--load", "-l", default=None, help="load model"
         )
         parser.add_argument(
-            "--conf_matrix", "-cm", default=False, action="store_true", help="Confusion matrix"
+            "--conf_matrix", "-cm", default=False, action="store_true", help="build confusion matrix"
+        )
+        parser.add_argument(
+            "--get_features_importance", "-gfi", default=False, action="store_true", help="get features importance"
         )
         parser.add_argument(
             "--device", "-d", choices=["cpu", "gpu"], default="cpu",
         )
         parser.add_argument(
-            "--clean_sandbox", "-cs", default=False, action="store_true", help="Clean sandbox"
+            "--clean_sandbox", "-cs", default=False, action="store_true", help="clean sandbox"
         )
         parser.add_argument(
-            "--HELP", "-H", default=False, action="store_true", help="Show help"
+            "--info", "-i", default=False, action="store_true", help="show information message"
         )
 
         self.args = parser.parse_args()
@@ -724,7 +728,7 @@ class DLOrchestrator:
         if self.args.clean_sandbox:
             self.session.clean_sandbox()
 
-        if self.args.HELP:
+        if self.args.info:
             self.help()
             return
 
@@ -756,67 +760,10 @@ class DLOrchestrator:
             elif action == "benchmark":
                 self.session.benchmark(model_path=self.args.load)
 
-    @staticmethod
-    def help():
-        print("""
-DL Session Helper
+    def help(self):
+        helper = self.session_args.get("helper", None)
 
-==================
-
-Usage:
-    python -m src.dl.dl_main [OPTIONS]
-
-Available models:
-    mlp -- MLP
-    tab-transformer-v1 -- Tab-Transformer (V1)
-    tab-transformer-v2 -- Tab-Transformer (V2)
-
-Available actions:
-    optimize
-    train
-    test -- requires train
-    check_high_confidence_bias -- requires train
-    benchmark -- requires train
-    
-Available devices:
-    cpu
-    gpu (if accessible)
-
-Options:
-    -m, --model <model>:
-        to select a model for the session
-        
-    -lsc, --logits_scaling:
-        to scale the logits
-
-    -a, --actions <actions>:
-        to resolve the provided actions
-
-    -c, --calibrate:
-        to calibrate the model
-
-    -s, --save:
-        to save the session results (metadata, train, test,...) 
-        and the model 
-
-    -r, --root <new_root>:
-        to specify a new root for backup (default: runs/sandbox)
-
-    -sn, --save_name <save_name>:
-        to specify a save filename (optional)
-
-    -sf, --save_format <save_format>:
-        to specify a save format for model (default: pt)
-        
-    -l, --load <model_path>:
-        to load the specified model
-
-    -cm, --conf_matrix:
-        to enable the building of confusion matrix
-
-    -d, --device:
-        to change the execution device (default: cpu)
-
-    -cs, --clean_sandbox:
-        to clean sandbox
-""")
+        if helper is not None:
+            print(helper)
+        else:
+            subprocess.call("python -m src.dl.dl_main -h", shell=True)

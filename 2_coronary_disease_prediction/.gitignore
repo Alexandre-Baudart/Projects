@@ -4,6 +4,7 @@ report
 __pycache__
 Notes
 data/Notes_data
+data/data_exploration.py
 data/__pycache__
 src/dl/libs/nncore/ennp.py
 src/foundation

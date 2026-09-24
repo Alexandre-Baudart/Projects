@@ -1,5 +1,6 @@
 import os
 import shutil
+import subprocess
 import json
 import argparse
 from pathlib import Path
@@ -378,42 +379,42 @@ class MLOrchestrator:
         )
         parser.add_argument(
             "--model", "-m", choices=self.sess_models,
-            help="Model used"
+            help="model used for the session"
         )
         parser.add_argument(
             "--actions", "-a", nargs='+',
             choices=["optimize", "cross_validate", "train", "test", "check_high_confidence_bias", "benchmark"],
-            help="Action"
+            help="actions available"
         )
         parser.add_argument(
-            "--calibrate", "-c", default=False, action="store_true", help="Calibrate model"
+            "--calibrate", "-c", default=False, action="store_true", help="calibrate model"
         )
         parser.add_argument(
-            "--save", "-s", default=False, action="store_true", help="Save activation"
+            "--save", "-s", default=False, action="store_true", help="enable backup"
         )
         parser.add_argument(
-            "--root", "-r", default="runs/sandbox", help="Root"
+            "--root", "-r", default="runs/sandbox", help="backup root"
         )
         parser.add_argument(
-            "--save_name", "-sn", default=None, help="Save filename"
+            "--save_name", "-sn", default=None, help="save filename"
         )
         parser.add_argument(
-            "--save_format", "-sf", default="joblib", help="Save format"
+            "--save_format", "-sf", default="joblib", help="save format"
         )
         parser.add_argument(
-            "--load", "-l", default=None, help="Load model"
+            "--load", "-l", default=None, help="load model"
         )
         parser.add_argument(
-            "--conf_matrix", "-cm", default=False, action="store_true", help="Confusion matrix"
+            "--conf_matrix", "-cm", default=False, action="store_true", help="build confusion matrix"
         )
         parser.add_argument(
-            "--get_features_importance", "-gfi", default=False, action="store_true", help="Get features importance"
+            "--get_features_importance", "-gfi", default=False, action="store_true", help="get features importance"
         )
         parser.add_argument(
-            "--clean_sandbox", "-cs", default=False, action="store_true", help="Clean sandbox"
+            "--clean_sandbox", "-cs", default=False, action="store_true", help="clean sandbox"
         )
         parser.add_argument(
-            "--HELP", "-H", default=False, action="store_true", help="Show help"
+            "--info", "-i", default=False, action="store_true", help="show information message"
         )
 
         # args = dict(vars(parser.parse_args()))
@@ -465,7 +466,7 @@ class MLOrchestrator:
         if self.args.clean_sandbox:
             self.session.clean_sandbox()
 
-        if self.args.HELP:
+        if self.args.info:
             self.help()
             return
 
@@ -495,67 +496,10 @@ class MLOrchestrator:
             elif action == "benchmark":
                 self.session.benchmark()
 
-    @staticmethod
-    def help():
-        print("""
-ML Session Helper
+    def help(self):
+        helper = self.session_args.get("helper", None)
 
-==================
-
-Usage:
-    python -m src.ml.ml_main [OPTIONS]
-    
-Available models:
-    logreg -- Logistic Regression
-    svm -- SVM
-    random_forest -- Random Forest
-    xgb -- XGBoost
-    catb -- CatBoost
-    
-Available actions:
-    optimize
-    train
-    cross-validate
-    test -- requires train
-    check_high_confidence_bias -- requires train
-    benchmark -- requires train
-    
-Available formats:
-    joblib
-    skops
-        
-Options:
-    -m, --model <model>:
-        to select a model for the session
-    
-    -a, --actions <actions>:
-        to resolve the provided actions
-    
-    -c, --calibrate:
-        to calibrate the model
-    
-    -s, --save:
-        to save the session results (metadata, train, test,...) 
-        and the model 
-    
-    -r, --root <new_root>:
-        to specify a new root for backup (default: runs/sandbox)
-    
-    -sn, --save_name <save_name>:
-        to specify a save filename (optional)
-        
-    -sf, --save_format <save_format>:
-        to specify a save format for model (default: joblib)
-        
-    -l, --load <model_path>:
-        to load the specified model
-    
-    -cm, --conf_matrix:
-        to enable the building of confusion matrix
-    
-    -gfi, --get_features_importance:
-        to recover features importance
-    
-    -cs, --clean_sandbox:
-        to clean sandbox
-    """)
+        if helper is not None:
+            print(helper)
+        else:
+            subprocess.call("python -m src.ml.ml_main -h", shell=True)

@@ -20,7 +20,79 @@ METADATA = {
     "last_run": 0
 }
 
-config = {
+HELPER = """
+ML Session Helper
+
+==================
+
+Usage:
+    python -m src.ml.ml_main [OPTIONS]
+    
+Available models:
+    logreg -- Logistic Regression
+    svm -- SVM
+    random_forest -- Random Forest
+    xgb -- XGBoost
+    catb -- CatBoost
+    
+Available actions:
+    optimize
+    train
+    cross-validate
+    test -- requires train or model_path
+    check_high_confidence_bias -- requires train or model_path
+    benchmark -- requires train or model_path
+    
+Available formats:
+    joblib
+    skops
+        
+Options:
+    -m, --model <model>:
+        to select a model for the session
+    
+    -a, --actions <actions>:
+        to resolve the provided actions
+        
+        Examples:
+            -a train
+            -a optimize
+            -a train test
+            -a test -l <model_path> 
+    
+    -c, --calibrate:
+        to calibrate the model
+    
+    -s, --save:
+        to save the session results (metadata, train, test,...) 
+        and the model 
+    
+    -r, --root <new_root>:
+        to specify a new root for backup (default: runs/sandbox)
+    
+    -sn, --save_name <save_name>:
+        to specify a save filename (optional)
+        
+    -sf, --save_format <save_format>:
+        to specify a save format for model (default: joblib)
+        
+    -l, --load <model_path>:
+        to load the specified model
+    
+    -cm, --conf_matrix:
+        to enable the building of confusion matrix
+    
+    -gfi, --get_features_importance:
+        to recover features importance
+    
+    -cs, --clean_sandbox:
+        to clean sandbox
+        
+    -i, --info:
+        show this information message and exit
+"""
+
+CONFIG = {
     "random_seed": 42,
     "mode": "clf_binary",
 
@@ -48,7 +120,7 @@ config = {
     }
 }
 
-model_config = {
+MODEL_CONFIG = {
     "logreg": {
         "raw_model": LogisticReg,
 
@@ -147,11 +219,12 @@ if __name__ == "__main__" :
     dataset.split_data_csv(train_size=0.8, calib_size=0.1, target="target_binary")
 
     session_args = {
-        "model_config": model_config,
+        "model_config": MODEL_CONFIG,
         "dataset": dataset,
-        "config": config,
+        "config": CONFIG,
         "target": "target_binary",
-        "metadata": None
+        "metadata": None,
+        "helper": HELPER,
     }
 
     orch = MLOrchestrator(
