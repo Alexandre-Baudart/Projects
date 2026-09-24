@@ -214,13 +214,14 @@ if __name__ == "__main__" :
             "bin_threshold": 0
         }
     )
-    # dataset.split_data_csv(train_size=0.8, calib_size=0.1, target="target_binary")
+    dataset.split_data_csv(train_size=0.8, calib_size=0.1, target="target_binary")
 
     session_args = {
         "model_config": model_config,
         "dataset": dataset,
         "config": config,
-        "target": "target_binary"
+        "target": "target_binary",
+        "metadata": None
     }
 
     orch = DLOrchestrator(

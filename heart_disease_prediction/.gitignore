@@ -3,6 +3,8 @@ report
 .idea
 __pycache__
 Notes
+data/analysis_utils.py
+data/data_exploration.py
 data/Notes_data
 data/__pycache__
 src/dl/libs/nncore/ennp.py
