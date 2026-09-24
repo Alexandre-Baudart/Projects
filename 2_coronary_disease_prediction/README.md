@@ -6,7 +6,7 @@ This project evaluates and compares various machine learning models to predict t
 coronary artery disease in patients. 
 Feature importance and the impact of model calibration were also analyzed.
 
-Check out the live demo **[here](https://heart-disease-prediction-project-demo.streamlit.app/)**. If the app is sleeping, don't hesitate to reload it. Thanks!
+Check out the live demo **[here](https://coronary-disease-prediction-project-demo.streamlit.app/)**. If the app is sleeping, don't hesitate to reload it. Thanks!
 
 Check out the report **[here](report.pdf)**.
 
