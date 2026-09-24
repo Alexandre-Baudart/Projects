@@ -3,8 +3,10 @@ src/cpp_part
 rapport
 .idea
 __pycache__
+data/data_exploration.py
 Notes
 Notes_preproc_modeling
+Runs/
 data/Notes_data
 data/__pycache__
 src/ml_part/libs/isolation_forest.py
