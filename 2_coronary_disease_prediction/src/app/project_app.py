@@ -80,7 +80,7 @@ content = {
     },
 
     "en": {
-        "title": "Heart Disease Prediction Demo",
+        "title": "Coronary Disease Prediction Demo",
         "subtitle": "Adjust the following parameters",
         "predict_button": "Predict",
 
